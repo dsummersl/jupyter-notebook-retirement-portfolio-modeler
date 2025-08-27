@@ -20,7 +20,6 @@
 import polars as pl
 import numpy as np
 from great_tables import GT
-import yahooquery as yq
 import seaborn as sns
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
@@ -31,6 +30,20 @@ from pandas.tseries.holiday import USFederalHolidayCalendar
 from IPython.display import Markdown, display
 
 # %config InlineBackend.figure_format = "retina"
+import sys
+from pathlib import Path
+
+sys.path.append(str(Path.cwd()))
+from plugins.basic_asset import BasicAsset
+from plugins.stock_asset import StockPortfolioAsset
+from plugins.constants import num_trading_days
+
+# %config InlineBackend.figure_format = "retina"
+ASSET_CLASS_MAP = {
+    "basic_asset": BasicAsset,
+    "stock_portfolio": StockPortfolioAsset,
+}
+
 sns.set_theme()
 
 # %% + tags=["parameters"]
@@ -41,7 +54,7 @@ description = "A sample simulation of a 30 year old making modest contributions 
 parameter_source = "this notebook"
 
 # Number of Monte Carlo simulations to run
-num_simulations = 1_000
+num_simulations = 100
 
 # Age of the person at which the simulation starts
 starting_age = 30
@@ -74,30 +87,67 @@ draw_priority = ["emergency_fund", "stocks", "real_estate"]
 # The stock parameters will be calculated from historical data in the next step.
 asset_classes = {
     "stocks": {
-        "initial_investment": 100_000,
-        "portfolio_mix": {
-            "VFIAX": 0.06, "VIMAX": 0.08, "VMLUX": 0.18,
-            "VTCLX": 0.39, "VTMGX": 0.13, "VTMSX": 0.09, "VWIUX": 0.12,
+        "type": "stock_portfolio",
+        "params": {
+            "initial_investment": 100_000,
+            "portfolio_mix": {
+                "VFIAX": 0.06,
+                "VIMAX": 0.08,
+                "VMLUX": 0.18,
+                "VTCLX": 0.39,
+                "VTMGX": 0.13,
+                "VTMSX": 0.09,
+                "VWIUX": 0.12,
+            },
         },
     },
     "real_estate": {
-        "initial_investment": 250_000, # Value of real estate holdings
-        "expected_return": 0.04,  # Assumed long-term appreciation
-        "volatility": 0.05,       # Lower than stocks, illiquid
+        "type": "basic_asset",
+        "params": {
+            "initial_investment": 250_000,  # Value of real estate holdings
+            "expected_return": 0.04,  # Assumed long-term appreciation
+            "volatility": 0.05,  # Lower than stocks, illiquid
+        },
     },
     "emergency_fund": {
-        "initial_investment": 10_000, # Cash for emergencies
-        "expected_return": 0.041,  # Interest
-        "volatility": 0.005,      # Near-zero volatility
+        "type": "basic_asset",
+        "params": {
+            "initial_investment": 10_000,  # Cash for emergencies
+            "expected_return": 0.041,  # Assumed long-term appreciation
+            "volatility": 0.005,  # Lower than stocks, illiquid
+        },
     },
 }
 
-initial_investment = sum(v["initial_investment"] for v in asset_classes.values())
+initial_investment = sum(
+    v["params"]["initial_investment"] for v in asset_classes.values()
+)
+
 
 # %% jupyter={"source_hidden": true}
-# Number of trading days in a year (used for daily returns)
-num_trading_days = 252
+def initialize_assets(config: dict) -> dict:
+    """
+    Initializes asset objects from the configuration dictionary
+    using the dynamic asset class map.
+    """
+    assets = {}
+    for name, asset_config in config.items():
+        asset_type = asset_config["type"]
+        asset_class = ASSET_CLASS_MAP.get(asset_type)
 
+        if not asset_class:
+            raise ValueError(f"Unknown asset type '{asset_type}' for asset '{name}'.")
+
+        # Add the asset's name to its params for potential logging/debugging
+        asset_config["params"]["name"] = name
+        assets[name] = asset_class(asset_config["params"])
+
+    return assets
+
+
+initiazed_asset_classes = initialize_assets(asset_classes)
+
+# %% jupyter={"source_hidden": true}
 years_to_seventy = 70 - starting_age
 
 pi = 75
@@ -107,48 +157,6 @@ display(Markdown(f"Parameters sourced from: {parameter_source}"))
 
 # %% jupyter={"source_hidden": true}
 # These functions fetch historical data and calculate the accurate risk/return profile for the stock portfolio.
-
-def fetch_stock_data(tickers: list[str]) -> pl.DataFrame:
-    """Fetches historical data for a list of stock tickers and calculates daily log returns."""
-    data = yq.Ticker(tickers)
-    historical_data = data.history(start="2001-01-01", end="2020-12-31", interval="1d")
-
-    if historical_data.empty:
-        raise ValueError("No data found for the given stock tickers.")
-
-    historical_data.reset_index(inplace=True)
-    df = pl.from_pandas(historical_data)
-
-    # Pivot to get tickers as columns and calculate log returns
-    adjclose_df = df.pivot(index="date", on="symbol", values="adjclose")
-    log_returns_df = adjclose_df.select(
-        [pl.col("date")] + [
-            np.log(pl.col(c) / pl.col(c).shift(1)).alias(c)
-            for c in tickers
-        ]
-    ).drop_nulls()
-
-    return log_returns_df
-
-def calculate_portfolio_params(log_returns_df: pl.DataFrame, portfolio_mix: dict) -> tuple[float, float]:
-    """Calculates the expected return and volatility for a portfolio mix."""
-    tickers = list(portfolio_mix.keys())
-    weights = np.array([portfolio_mix[ticker] for ticker in tickers])
-
-    # Calculate annualized expected returns for each ticker
-    expected_returns = log_returns_df.select(tickers).mean().to_numpy().flatten() * num_trading_days
-
-    # Calculate annualized covariance matrix
-    cov_matrix = log_returns_df.select(tickers).to_pandas().cov().to_numpy() * num_trading_days
-
-    # Calculate total portfolio expected return
-    portfolio_expected_return = np.sum(weights * expected_returns)
-
-    # Calculate total portfolio variance and volatility
-    portfolio_variance = np.dot(weights.T, np.dot(cov_matrix, weights))
-    portfolio_volatility = np.sqrt(portfolio_variance)
-
-    return portfolio_expected_return, portfolio_volatility
 
 
 def generate_trading_days(start_year: int, num_years: int) -> list:
@@ -161,10 +169,11 @@ def generate_trading_days(start_year: int, num_years: int) -> list:
     holidays = calendar.holidays(start=start_date, end=end_date)
 
     # Generate business days and remove holidays
-    business_days = pd.bdate_range(start=start_date, end=end_date, freq='B')
+    business_days = pd.bdate_range(start=start_date, end=end_date, freq="B")
     trading_days = business_days.drop(business_days.intersection(holidays))
 
     return [day.to_pydatetime() for day in trading_days]
+
 
 def melt_raw_data(raw_data, value_name, start_year: int, num_years: int):
     """Enhanced version that maps trading days to realistic calendar dates."""
@@ -181,7 +190,7 @@ def melt_raw_data(raw_data, value_name, start_year: int, num_years: int):
         additional_days = pd.bdate_range(
             start=last_date + timedelta(days=1),
             periods=num_days - len(realistic_trading_days),
-            freq='B'
+            freq="B",
         )
         realistic_trading_days.extend([day.to_pydatetime() for day in additional_days])
 
@@ -192,7 +201,9 @@ def melt_raw_data(raw_data, value_name, start_year: int, num_years: int):
         {f"sim_{i}": sim for i, sim in enumerate(raw_data)},
     ).with_columns(trading_days_series)
 
-    melted = df.unpivot(index=["trading_day"], variable_name="simulation", value_name=value_name)
+    melted = df.unpivot(
+        index=["trading_day"], variable_name="simulation", value_name=value_name
+    )
 
     # Map trading day indices to realistic dates
     date_mapping = {i + 1: date for i, date in enumerate(realistic_trading_days)}
@@ -210,8 +221,10 @@ def compound_interest(year, capital, ir, bonus):
         return capital
     return compound_interest(year - 1, capital * (1 + ir) + bonus, ir, bonus)
 
+
 def investment_fn(year):
     return investment_per_year if year < fulltime_years else 0
+
 
 def draw_fn(year):
     """
@@ -229,14 +242,19 @@ def draw_fn(year):
 
     # During part-time years
     if year < parttime_years:
-        return compound_interest(year, expected_draw - parttime_income, inflation_rate, 0)
+        return compound_interest(
+            year, expected_draw - parttime_income, inflation_rate, 0
+        )
 
     # After age 70 social security kicks in
     if year > years_to_seventy:
-        return compound_interest(year, expected_draw - social_security, inflation_rate, 0)
+        return compound_interest(
+            year, expected_draw - social_security, inflation_rate, 0
+        )
 
     # Full retirement before social security
     return compound_interest(year, expected_draw, inflation_rate, 0)
+
 
 def simulate_portfolio_gbm(
     initial_investment,
@@ -244,7 +262,7 @@ def simulate_portfolio_gbm(
     volatility,
     num_years,
     num_trading_days,
-    rng=None
+    rng=None,
 ):
     """
     Generator for a single simulation path using GBM.
@@ -264,7 +282,6 @@ def simulate_portfolio_gbm(
         value *= np.exp(daily_return)
 
         yield day, value
-
 
 
 def run_multi_asset_simulation(
@@ -288,14 +305,17 @@ def run_multi_asset_simulation(
     days_per_month = num_trading_days // 12
 
     # Storage for results
-    raw_sims = {name: np.zeros((num_simulations, num_days)) for name in asset_classes_config}
+    raw_sims = {
+        name: np.zeros((num_simulations, num_days)) for name in asset_classes_config
+    }
     investments = np.zeros((num_simulations, num_days))
     withdrawals = np.zeros((num_simulations, num_days))
 
-
     # TODO parallelize this loop for performance?
     for sim in range(num_simulations):
-        balances = {name: cfg["initial_investment"] for name, cfg in asset_classes_config.items()}
+        balances = {
+            name: cfg.initial_investment for name, cfg in asset_classes_config.items()
+        }
 
         # Initialize random generators per asset
         rngs = {name: np.random.default_rng() for name in asset_classes_config}
@@ -307,7 +327,10 @@ def run_multi_asset_simulation(
             for name, cfg in asset_classes_config.items():
                 dt = 1 / num_trading_days
                 random_shock = rngs[name].normal(0, 1)
-                daily_return = cfg["expected_return"] * dt + cfg["volatility"] * np.sqrt(dt) * random_shock
+                daily_return = (
+                    cfg.expected_return * dt
+                    + cfg.volatility * np.sqrt(dt) * random_shock
+                )
                 balances[name] *= np.exp(daily_return)
 
             daily_investment = 0.0
@@ -339,52 +362,54 @@ def run_multi_asset_simulation(
     total_portfolio_raw = sum(raw_sims.values())
 
     # Melt using your existing function
-    total_melted_df = melt_raw_data(total_portfolio_raw, "portfolio_value", datetime.now().year, num_years)
+    total_melted_df = melt_raw_data(
+        total_portfolio_raw, "portfolio_value", datetime.now().year, num_years
+    )
 
     # Add investment/withdrawal columns using Polars with_columns
-    total_melted_df = total_melted_df.with_columns([
-        pl.Series("investment", investments.flatten()),
-        pl.Series("withdrawal", withdrawals.flatten())
-    ])
+    total_melted_df = total_melted_df.with_columns(
+        [
+            pl.Series("investment", investments.flatten()),
+            pl.Series("withdrawal", withdrawals.flatten()),
+        ]
+    )
 
     # Individual melted dfs
     individual_melted_dfs = {
-        name: melt_raw_data(raw_sims[name], f"{name}_value", datetime.now().year, num_years)
+        name: melt_raw_data(
+            raw_sims[name], f"{name}_value", datetime.now().year, num_years
+        )
         for name in asset_classes_config
     }
     final_values = total_portfolio_raw[:, -1]
 
     return total_melted_df, individual_melted_dfs, final_values
 
-# %% jupyter={"source_hidden": true}
-# Step 1: Calculate the actual risk/return for the stock portfolio
-stock_tickers = list(asset_classes['stocks']['portfolio_mix'].keys())
-stock_log_returns = fetch_stock_data(stock_tickers)
-stock_return, stock_volatility = calculate_portfolio_params(stock_log_returns, asset_classes['stocks']['portfolio_mix'])
-
-# Step 2: Update the asset class config with the calculated values
-asset_classes['stocks']['expected_return'] = stock_return
-asset_classes['stocks']['volatility'] = stock_volatility
 
 # Step 3: Run the full multi-asset simulation
 simulated_totals_df, simulated_assets_df, final_values = run_multi_asset_simulation(
-    asset_classes_config=asset_classes,
+    asset_classes_config=initiazed_asset_classes,
     investment_fn=investment_fn,
     draw_fn=draw_fn,
     num_years=num_years,
     num_trading_days=num_trading_days,
     num_simulations=num_simulations,
-    priority_order=draw_priority
+    priority_order=draw_priority,
 )
 
 initial_investment_description = "Assets at beginning of simulation:\n"
-for name, config in asset_classes.items():
+for name, config in initiazed_asset_classes.items():
     initial_investment_description += f"- {name.title()}:\n"
-    initial_investment_description += f"  - Initial Investment: ${config['initial_investment']:,.0f}\n"
-    initial_investment_description += f"  - Expected Return: {config['expected_return']:.2%}\n"
-    initial_investment_description += f"  - Volatility: {config['volatility']:.2%}\n"
+    initial_investment_description += (
+        f"  - Initial Investment: ${config.initial_investment:,.0f}\n"
+    )
+    initial_investment_description += (
+        f"  - Expected Return: {config.expected_return:.2%}\n"
+    )
+    initial_investment_description += f"  - Volatility: {config.volatility:.2%}\n"
 
 display(Markdown(initial_investment_description))
+
 
 # %% jupyter={"source_hidden": true}
 def add_lifecycle_milestones(ax, show_legend=True):
@@ -406,7 +431,7 @@ def add_lifecycle_milestones(ax, show_legend=True):
             color="blue",
             linestyle="--",
             alpha=0.7,
-            label="Stop Full-Time Work"
+            label="Stop Full-Time Work",
         )
         milestone_lines.append(line)
 
@@ -416,7 +441,7 @@ def add_lifecycle_milestones(ax, show_legend=True):
             color="green",
             linestyle="-.",
             alpha=0.7,
-            label="Full Retirement"
+            label="Full Retirement",
         )
         milestone_lines.append(line)
 
@@ -427,7 +452,7 @@ def add_lifecycle_milestones(ax, show_legend=True):
             color="red",
             linestyle=":",
             alpha=0.7,
-            label="Age 70 (Social Security)"
+            label="Age 70 (Social Security)",
         )
         milestone_lines.append(line)
 
@@ -439,13 +464,17 @@ def add_lifecycle_milestones(ax, show_legend=True):
         milestone_labels = [line.get_label() for line in milestone_lines]
 
         if handles:  # If there are existing legend entries
-            ax.legend(handles + milestone_handles, labels + milestone_labels, loc="upper left")
+            ax.legend(
+                handles + milestone_handles, labels + milestone_labels, loc="upper left"
+            )
         else:  # If no existing legend
             ax.legend(milestone_handles, milestone_labels, loc="upper left")
 
+
 # %% jupyter={"source_hidden": true}
 
-display(Markdown(f"""
+display(
+    Markdown(f"""
 ## Summary of Outcomes
 
 The table below shows the results of running {num_simulations} simulations of the portfolio over {num_years} years.
@@ -453,23 +482,25 @@ The table below shows the results of running {num_simulations} simulations of th
 The `Percent > 0` column indicates the percentage of simulations where the final value was greater than zero, which is a measure of success for the portfolio.
 
 Portfolio managers typically aim for a success rate of 75% or higher.
-"""))
+""")
+)
 
 # %% jupyter={"source_hidden": true}
+
 
 def calculate_asset_statistics(assets_df, total_final_values, asset_classes_config):
     """Calculate percentiles and volatility for each asset class and total"""
     stats = {}
 
     # Add total portfolio stats
-    stats['Total'] = {
-        'p25': np.percentile(total_final_values, 25),
-        'median': np.median(total_final_values),
-        'p75': np.percentile(total_final_values, 75),
-        'p95': np.percentile(total_final_values, 95),
-        'volatility': np.std(total_final_values),
-        'initial': sum(v["initial_investment"] for v in asset_classes_config.values()),
-        'perc_success': (total_final_values > 0).sum() / num_simulations
+    stats["Total"] = {
+        "p25": np.percentile(total_final_values, 25),
+        "median": np.median(total_final_values),
+        "p75": np.percentile(total_final_values, 75),
+        "p95": np.percentile(total_final_values, 95),
+        "volatility": np.std(total_final_values),
+        "initial": sum(v.initial_investment for v in asset_classes_config.values()),
+        "perc_success": (total_final_values > 0).sum() / num_simulations,
     }
 
     # Add individual asset stats
@@ -478,37 +509,38 @@ def calculate_asset_statistics(assets_df, total_final_values, asset_classes_conf
         # Get the final value for each simulation (i.e., last trading_day per simulation)
         final_values = (
             df.sort(["simulation", "trading_day"])  # ensure sorted
-              .with_columns([
-                  pl.col(value_col).last().over("simulation").alias("final_value")
-              ])
-              .unique(subset=["simulation"])
-              .select("final_value")
-              .to_series()
-              .to_numpy()
+            .with_columns(
+                [pl.col(value_col).last().over("simulation").alias("final_value")]
+            )
+            .unique(subset=["simulation"])
+            .select("final_value")
+            .to_series()
+            .to_numpy()
         )
         stats[name.title()] = {
-            'p25': np.percentile(final_values, 25),
-            'median': np.median(final_values),
-            'p75': np.percentile(final_values, 75),
-            'p95': np.percentile(final_values, 95),
-            'volatility': np.std(final_values),
-            'initial': asset_classes_config[name]['initial_investment'],
-            'prob_success': np.mean(final_values > 0),
-            'perc_success': (final_values > 0).sum() / num_simulations
+            "p25": np.percentile(final_values, 25),
+            "median": np.median(final_values),
+            "p75": np.percentile(final_values, 75),
+            "p95": np.percentile(final_values, 95),
+            "volatility": np.std(final_values),
+            "initial": asset_classes_config[name].initial_investment,
+            "prob_success": np.mean(final_values > 0),
+            "perc_success": (final_values > 0).sum() / num_simulations,
         }
 
     return stats
 
+
 def asset_stats_to_polars_df(asset_stats):
     """Convert asset_stats dict to a Polars DataFrame with formatted columns using great_tables"""
     metrics = [
-        ("Initial Investment", lambda s: s['initial']),
-        ("25th Percentile", lambda s: s['p25']),
-        ("Median (50th)", lambda s: s['median']),
-        ("75th Percentile", lambda s: s['p75']),
-        ("95th Percentile", lambda s: s['p95']),
-        ("Volatility (Std Dev)", lambda s: s['volatility']),
-        ("Percent > 0", lambda s: s['perc_success']),
+        ("Initial Investment", lambda s: s["initial"]),
+        ("25th Percentile", lambda s: s["p25"]),
+        ("Median (50th)", lambda s: s["median"]),
+        ("75th Percentile", lambda s: s["p75"]),
+        ("95th Percentile", lambda s: s["p95"]),
+        ("Volatility (Std Dev)", lambda s: s["volatility"]),
+        ("Percent > 0", lambda s: s["perc_success"]),
     ]
 
     assets = list(asset_stats.keys())
@@ -518,8 +550,14 @@ def asset_stats_to_polars_df(asset_stats):
     for asset in assets:
         values = [fmt(asset_stats[asset]) for _, fmt in metrics]
         # Convert all numpy types to Python floats/ints
-        values = [v.item() if isinstance(v, np.generic) else float(v) if isinstance(v, (int,float,np.floating)) else v
-                  for v in values]
+        values = [
+            v.item()
+            if isinstance(v, np.generic)
+            else float(v)
+            if isinstance(v, (int, float, np.floating))
+            else v
+            for v in values
+        ]
         data[asset] = values
 
     # Create Polars DataFrame safely
@@ -533,8 +571,11 @@ def asset_stats_to_polars_df(asset_stats):
         .fmt_currency(["Total"] + assets, rows=[-2], decimals=0, pattern="±{x}")
     )
 
+
 # Calculate statistics for all assets
-asset_stats = calculate_asset_statistics(simulated_assets_df, final_values, asset_classes)
+asset_stats = calculate_asset_statistics(
+    simulated_assets_df, final_values, initiazed_asset_classes
+)
 
 asset_stats_to_polars_df(asset_stats)
 
@@ -546,9 +587,11 @@ asset_stats_to_polars_df(asset_stats)
 #
 # This chart shows the aggregated value of all asset classes over time. The shaded area represents the 75% prediction interval, showing the range of most likely outcomes.
 
+
 # %% jupyter={"source_hidden": true}
 def money_formatter(x, pos):
-    return f"${x/1_000_000:.1f}M"
+    return f"${x / 1_000_000:.1f}M"
+
 
 fig, ax = plt.subplots(figsize=(14, 7))
 sns.lineplot(
@@ -586,14 +629,14 @@ for i, (name, df) in enumerate(simulated_assets_df.items()):
         ax=ax,
         data=df,
         x="trading_date",
-        y=df.columns[-2], # The value column name is dynamic
+        y=df.columns[-2],  # The value column name is dynamic
         legend=False,
         linewidth=1,
         errorbar=("pi", pi),
     )
     ax.set_title(f"Median Projection for {name.title()}")
     ax.set_ylabel("Asset Value")
-    ax.yaxis.set_major_formatter(FuncFormatter(lambda x, pos: f"${x/1_000_000:.2f}M"))
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda x, pos: f"${x / 1_000_000:.2f}M"))
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
     add_lifecycle_milestones(ax, show_legend=False)
 
@@ -605,6 +648,7 @@ plt.show()
 #
 # This chart shows the cumulative investments and draws over time,
 # alongside the median portfolio value. It helps visualize how cash flows impact the overall portfolio.
+
 
 # %% jupyter={"source_hidden": true}
 def create_investment_draw_data(investment_fn, draw_fn, num_years, num_trading_days):
@@ -629,6 +673,7 @@ def create_investment_draw_data(investment_fn, draw_fn, num_years, num_trading_d
 
     return yearly_investments, yearly_draws
 
+
 # Generate the investment and draw data
 cumulative_investments, cumulative_draws = create_investment_draw_data(
     investment_fn, draw_fn, num_years, num_trading_days
@@ -644,7 +689,7 @@ if len(realistic_trading_days) < num_days:
     additional_days = pd.bdate_range(
         start=last_date + timedelta(days=1),
         periods=num_days - len(realistic_trading_days),
-        freq='B'
+        freq="B",
     )
     realistic_trading_days.extend([day.to_pydatetime() for day in additional_days])
 
@@ -653,37 +698,33 @@ realistic_trading_days = realistic_trading_days[:num_days]
 # Create the draw_df in the format expected by your plotting code
 draw_data = []
 for i, date in enumerate(realistic_trading_days):
-    draw_data.append({
-        "trading_date": date,
-        "value": cumulative_investments[i],
-        "variable": "Cumulative Investments"
-    })
-    draw_data.append({
-        "trading_date": date,
-        "value": cumulative_draws[i],
-        "variable": "Cumulative Draws"
-    })
+    draw_data.append(
+        {
+            "trading_date": date,
+            "value": cumulative_investments[i],
+            "variable": "Cumulative Investments",
+        }
+    )
+    draw_data.append(
+        {
+            "trading_date": date,
+            "value": cumulative_draws[i],
+            "variable": "Cumulative Draws",
+        }
+    )
 
 draw_df = pl.DataFrame(draw_data)
 
 # Calculate median portfolio value for the top plot
-median_portfolio_df = (
-    simulated_totals_df
-    .group_by("trading_date")
-    .agg(pl.col("portfolio_value").median().alias("median_portfolio_value"))
+median_portfolio_df = simulated_totals_df.group_by("trading_date").agg(
+    pl.col("portfolio_value").median().alias("median_portfolio_value")
 )
 
 # %% jupyter={"source_hidden": true}
 # Convert to Polars DataFrame
 fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, figsize=(15, 5))
 
-sns.lineplot(
-    ax=ax2,
-    data=draw_df,
-    x="trading_date",
-    y="value",
-    hue="variable"
-)
+sns.lineplot(ax=ax2, data=draw_df, x="trading_date", y="value", hue="variable")
 add_lifecycle_milestones(ax2, show_legend=False)
 
 # Format the x-axis to show breaks every year, and show money
@@ -701,8 +742,11 @@ sns.lineplot(
     y="median_portfolio_value",
 )
 add_lifecycle_milestones(ax1, show_legend=False)
+
+
 def mil_formatter(x, pos):
-    return f"${x/1_000_000:,.1f} M"
+    return f"${x / 1_000_000:,.1f} M"
+
 
 ax1.yaxis.set_major_formatter(FuncFormatter(mil_formatter))
 ax1.set_ylabel("Dollars")
