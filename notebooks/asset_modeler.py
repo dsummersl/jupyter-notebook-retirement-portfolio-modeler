@@ -412,7 +412,7 @@ def add_lifecycle_milestones(ax, show_legend=True):
 
     if parttime_years > 0:
         line = ax.axvline(
-            datetime(current_year + parttime_years, 5, 5),
+            datetime(current_year + fulltime_years + parttime_years, 5, 5),
             color="green",
             linestyle="-.",
             alpha=0.7,
