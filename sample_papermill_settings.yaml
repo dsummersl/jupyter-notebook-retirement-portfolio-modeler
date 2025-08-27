@@ -1,0 +1,40 @@
+description: |
+  This configuration is for a Monte Carlo simulation of retirement planning
+  without any further work income after age 48. I don't know what to do with
+  my crypto, since its so volatile, I assume I manage to sell half and invest
+  it in stablecoins.
+starting_age: 48
+num_years: 40
+fulltime_years: 0
+investment_per_year: 77000
+parttime_years: 1
+parttime_income: 35000
+social_security: 32000
+expected_draw: 120000  # 150_000 - 50_000 (no taxes really)
+asset_classes:
+  stocks:
+    initial_investment: 1775000  # 1_631_000 + 144_000
+    portfolio_mix:
+      VFIAX: 0.06
+      VIMAX: 0.08
+      VMLUX: 0.18
+      VTCLX: 0.39
+      VTMGX: 0.13
+      VTMSX: 0.09
+      VWIUX: 0.12
+    # 'expected_return' and 'volatility' will be calculated and populated later
+  real_estate:
+    initial_investment: 287000  # 550_000 - 263_000
+    expected_return: 0.04  # Assumed long-term appreciation
+    volatility: 0.05       # Lower than stocks, illiquid
+  # TODO crypto is very volatile - I'm not sure how to include it responsibly
+  # crypto:
+  #   initial_investment: 400000
+  #   expected_return: 0.10  # Highly speculative, higher expected return
+  #   volatility: 0.40       # Extremely high volatility
+  stablecoin:
+    # lets just assume for now I manage to sell half what I have as something stable.
+    initial_investment: 594000  # 194_000 + 400_000
+    expected_return: 0.041  # Return from lending/yield farming
+    volatility: 0.005      # Near-zero volatility
+draw_priority: ["stablecoin", "stocks", "real_estate"]
