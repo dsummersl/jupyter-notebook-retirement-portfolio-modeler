@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 
 
 class BaseAsset(ABC):
-    """Abstract Base Class for all asset types in a simulation."""
+    """A plain asset, with explicitly defined initial_investment, expected_return, and volatility."""
 
     def __init__(self, params: dict):
         self.initial_investment = params.get("initial_investment", 0)
