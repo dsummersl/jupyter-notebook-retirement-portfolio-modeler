@@ -33,10 +33,16 @@ from IPython.display import Markdown, display
 import sys
 from pathlib import Path
 
-sys.path.append(str(Path.cwd()))
+# Get the directory containing this notebook file
+notebook_dir = (
+    Path(__file__).parent if "__file__" in globals() else Path.cwd() / "notebooks"
+)
+sys.path.append(str(notebook_dir))
+
 from plugins.basic_asset import BasicAsset
 from plugins.stock_asset import StockPortfolioAsset
 from plugins.constants import num_trading_days
+from plugins.actions import ACTION_HANDLER_MAP
 
 # %config InlineBackend.figure_format = "retina"
 ASSET_CLASS_MAP = {
@@ -46,6 +52,9 @@ ASSET_CLASS_MAP = {
 
 sns.set_theme()
 
+# %% [markdown]
+# ## Simulation Configuration
+
 # %% + tags=["parameters"]
 # Description of the simulation
 description = "A sample simulation of a 30 year old making modest contributions every year, working part time after 65, and retiring at 70."
@@ -54,37 +63,87 @@ description = "A sample simulation of a 30 year old making modest contributions 
 parameter_source = "this notebook"
 
 # Number of Monte Carlo simulations to run
-num_simulations = 100
-
-# Age of the person at which the simulation starts
+num_simulations = 10
 starting_age = 30
+simulation_end_age = 90
+inflation_rate = 0.032
 
-# Number of years to simulate (default: up to age 90)
-num_years = 90 - starting_age
+# Define the person's financial lifecycle as a series of phases.
+# The simulation will process these in order.
+# All monetary values are in today's dollars and will be inflation-adjusted as simulations progress.
+life_phases = [
+    {
+        "name": "Early Career - Aggressive",
+        "duration": 10,  # Age 30-40
+        "annual_income": 90_000,
+        "annual_expenses": 70_000,
+        "annual_investment": 20_000,
+        # Define where the investment goes
+        "investment_allocation": {"stocks": 1.0},
+    },
+    {
+        "name": "Buy Primary Residence",
+        "duration": 1,  # Age 40
+        "annual_investment": 20_000,  # Still investing this year
+        "investment_allocation": {"stocks": 1.0},
+        "actions": [
+            {
+                "type": "buy_asset",
+                "name": "primary_residence",
+                "cost": 150_000,  # Down payment
+                "funding_priority": ["stocks", "emergency_fund"],
+                "config": {
+                    "type": "basic_asset",
+                    "params": {
+                        "expected_return": 0.04,
+                        "volatility": 0.05,
+                    },
+                },
+            }
+        ],
+    },
+    {
+        "name": "Mid Career - De-risking",
+        "duration": 14,  # Age 41-55
+        "annual_income": 180_000,
+        "annual_expenses": 120_000,
+        "annual_investment": 30_000,
+        # Example of splitting investment
+        "investment_allocation": {"stocks": 0.8, "emergency_fund": 0.2},
+        "actions": [
+            {
+                "type": "modify_asset",
+                "name": "stocks",
+                "updates": {
+                    "portfolio_mix": {
+                        "VTI": 0.6,
+                        "BND": 0.4,
+                    }  # Shift to 60/40 stocks/bonds
+                },
+            }
+        ],
+    },
+    {
+        "name": "Sell Home & Retire",
+        "duration": 1,  # Age 55
+        "actions": [
+            {"type": "sell_asset", "name": "primary_residence", "destination": "stocks"}
+        ],
+    },
+    {
+        "name": "Retirement",
+        "duration": 35,  # Age 55-90
+        "annual_income": 40_000,
+        "annual_expenses": 130_000,
+        "annual_investment": 0,
+        # No investment, so no allocation needed
+    },
+]
 
-# Number of years remaining to invest additional money while working full time
-fulltime_years = 65 - starting_age
-
-# Annual amount invested in the portfolio while working full time
-investment_per_year = 5_000
-
-# Number of years from now with no portfolio draw (e.g., working part time)
-parttime_years = 5
-
-# Annual income expected during part-time work
-parttime_income = 35_000
-
-# Estimated annual social security income, assumed to start at age 70
-social_security = 32_000
-
-# Total expected annual draw in today's dollars from the portfolio after full-time work (net of taxes/investments)
-expected_draw = 100_000
-
-# Which asset classes to draw to cover expenses from draw_fn
+# Which asset classes to draw from to cover expense shortfalls.
 draw_priority = ["emergency_fund", "stocks", "real_estate"]
 
 # Define each asset class with its initial value and risk/return parameters.
-# The stock parameters will be calculated from historical data in the next step.
 asset_classes = {
     "stocks": {
         "type": "stock_portfolio",
@@ -104,17 +163,17 @@ asset_classes = {
     "real_estate": {
         "type": "basic_asset",
         "params": {
-            "initial_investment": 250_000,  # Value of real estate holdings
-            "expected_return": 0.04,  # Assumed long-term appreciation
-            "volatility": 0.05,  # Lower than stocks, illiquid
+            "initial_investment": 250_000,
+            "expected_return": 0.04,
+            "volatility": 0.05,
         },
     },
     "emergency_fund": {
         "type": "basic_asset",
         "params": {
-            "initial_investment": 10_000,  # Cash for emergencies
-            "expected_return": 0.041,  # Assumed long-term appreciation
-            "volatility": 0.005,  # Lower than stocks, illiquid
+            "initial_investment": 10_000,
+            "expected_return": 0.041,
+            "volatility": 0.005,
         },
     },
 }
@@ -138,7 +197,6 @@ def initialize_assets(config: dict) -> dict:
         if not asset_class:
             raise ValueError(f"Unknown asset type '{asset_type}' for asset '{name}'.")
 
-        # Add the asset's name to its params for potential logging/debugging
         asset_config["params"]["name"] = name
         assets[name] = asset_class(asset_config["params"])
 
@@ -148,8 +206,7 @@ def initialize_assets(config: dict) -> dict:
 initiazed_asset_classes = initialize_assets(asset_classes)
 
 # %% jupyter={"source_hidden": true}
-years_to_seventy = 70 - starting_age
-
+num_years = simulation_end_age - starting_age
 pi = 75
 
 display(Markdown(description))
@@ -164,11 +221,9 @@ def generate_trading_days(start_year: int, num_years: int) -> list:
     start_date = datetime(start_year, 1, 1)
     end_date = datetime(start_year + num_years, 12, 31)
 
-    # Create business day range excluding US federal holidays
     calendar = USFederalHolidayCalendar()
     holidays = calendar.holidays(start=start_date, end=end_date)
 
-    # Generate business days and remove holidays
     business_days = pd.bdate_range(start=start_date, end=end_date, freq="B")
     trading_days = business_days.drop(business_days.intersection(holidays))
 
@@ -180,12 +235,9 @@ def melt_raw_data(raw_data, value_name, start_year: int, num_years: int):
     num_days = num_years * num_trading_days
     trading_days_series = pl.Series("trading_day", np.arange(1, num_days + 1))
 
-    # Generate realistic trading days
     realistic_trading_days = generate_trading_days(start_year, num_years)
 
-    # Ensure we have enough trading days for our simulation
     if len(realistic_trading_days) < num_days:
-        # If we need more days, extend with additional business days
         last_date = realistic_trading_days[-1]
         additional_days = pd.bdate_range(
             start=last_date + timedelta(days=1),
@@ -194,7 +246,6 @@ def melt_raw_data(raw_data, value_name, start_year: int, num_years: int):
         )
         realistic_trading_days.extend([day.to_pydatetime() for day in additional_days])
 
-    # Truncate to exact number needed
     realistic_trading_days = realistic_trading_days[:num_days]
 
     df = pl.DataFrame(
@@ -205,7 +256,6 @@ def melt_raw_data(raw_data, value_name, start_year: int, num_years: int):
         index=["trading_day"], variable_name="simulation", value_name=value_name
     )
 
-    # Map trading day indices to realistic dates
     date_mapping = {i + 1: date for i, date in enumerate(realistic_trading_days)}
     melted = melted.with_columns(
         pl.col("trading_day").replace_strict(date_mapping).alias("trading_date"),
@@ -215,78 +265,63 @@ def melt_raw_data(raw_data, value_name, start_year: int, num_years: int):
 
 
 # %% jupyter={"source_hidden": true}
-# These functions define the financial lifecycle and run the simulations.
-def compound_interest(year, capital, ir, bonus):
-    if year == 0:
-        return capital
-    return compound_interest(year - 1, capital * (1 + ir) + bonus, ir, bonus)
+# These functions process the `life_phases` configuration to drive the simulation.
 
 
-def investment_fn(year):
-    return investment_per_year if year < fulltime_years else 0
+def compound_value(base_value, rate, years):
+    """Calculates the future value of a single amount after n years of compounding."""
+    return base_value * ((1 + rate) ** years)
 
 
-def draw_fn(year):
+def generate_lifecycle_functions(phases: list[dict], base_inflation_rate: float):
     """
-    Calculate the expected draw from the portfolio based on the year. Assumptions being:
-    - During full-time work, no draws are made.
-    - During part-time work, the expected draw is reduced by the part-time income.
-    - When not working, the expected draw is the full amount.
-    - After age 70, social security income is added to the expected draw.
+    Processes the life_phases configuration and returns investment and draw functions
+    for the simulation.
     """
+    phase_start_years = []
+    current_year = 0
+    for phase in phases:
+        phase_start_years.append(current_year)
+        current_year += phase.get("duration", 1)
 
-    if year < fulltime_years:
-        return 0
+    def get_phase_for_year(year: int):
+        for i in range(len(phase_start_years) - 1, -1, -1):
+            if year >= phase_start_years[i]:
+                return phases[i]
+        return phases[0]
 
-    inflation_rate = 0.032
+    def investment_fn(year: int) -> float:
+        phase = get_phase_for_year(year)
+        return phase.get("annual_investment", 0)
 
-    # During part-time years
-    if year < parttime_years:
-        return compound_interest(
-            year, expected_draw - parttime_income, inflation_rate, 0
-        )
+    def investment_allocation_fn(year: int) -> dict:
+        phase = get_phase_for_year(year)
+        # Default to 100% stocks if not specified, for backward compatibility
+        return phase.get("investment_allocation", {"stocks": 1.0})
 
-    # After age 70 social security kicks in
-    if year > years_to_seventy:
-        return compound_interest(
-            year, expected_draw - social_security, inflation_rate, 0
-        )
+    def draw_fn(year: int) -> float:
+        phase = get_phase_for_year(year)
+        income = phase.get("annual_income", 0)
+        expenses = phase.get("annual_expenses", 0)
+        inflated_income = compound_value(income, base_inflation_rate, year)
+        inflated_expenses = compound_value(expenses, base_inflation_rate, year)
+        net_draw = max(0, inflated_expenses - inflated_income)
+        return net_draw
 
-    # Full retirement before social security
-    return compound_interest(year, expected_draw, inflation_rate, 0)
+    return investment_fn, investment_allocation_fn, draw_fn
 
 
-def simulate_portfolio_gbm(
-    initial_investment,
-    expected_return,
-    volatility,
-    num_years,
-    num_trading_days,
-    rng=None,
-):
-    """
-    Generator for a single simulation path using GBM.
-    Yields portfolio_value each day.
-    """
-    num_days = num_years * num_trading_days
-    dt = 1 / num_trading_days
-    value = initial_investment
-
-    if rng is None:
-        rng = np.random.default_rng()
-
-    for day in range(num_days):
-        # Random GBM step
-        random_shock = rng.normal(0, 1)
-        daily_return = expected_return * dt + volatility * np.sqrt(dt) * random_shock
-        value *= np.exp(daily_return)
-
-        yield day, value
+# Create the functions from our configuration
+investment_fn, investment_allocation_fn, draw_fn = generate_lifecycle_functions(
+    life_phases, inflation_rate
+)
 
 
 def run_multi_asset_simulation(
     asset_classes_config,
+    life_phases_config,
     investment_fn,
+    investment_allocation_fn,
     draw_fn,
     num_years,
     num_trading_days,
@@ -294,79 +329,80 @@ def run_multi_asset_simulation(
     priority_order=None,
 ):
     """
-    Multi-asset Monte Carlo simulation with daily GBM growth,
-    monthly withdrawals, and investment tracking.
-    Returns (total_melted_df, individual_melted_dfs, final_values).
+    Multi-asset Monte Carlo simulation using a pluggable action system.
     """
-    if priority_order is None:
-        priority_order = list(asset_classes_config.keys())
+    event_schedule = {}
+    current_year = 0
+    for phase in life_phases_config:
+        if "actions" in phase:
+            event_schedule[current_year] = phase["actions"]
+        current_year += phase.get("duration", 1)
 
     num_days = num_years * num_trading_days
     days_per_month = num_trading_days // 12
 
-    # Storage for results
-    raw_sims = {
-        name: np.zeros((num_simulations, num_days)) for name in asset_classes_config
-    }
+    all_asset_names = set(asset_classes_config.keys())
+    raw_sims = {name: np.zeros((num_simulations, num_days)) for name in all_asset_names}
     investments = np.zeros((num_simulations, num_days))
     withdrawals = np.zeros((num_simulations, num_days))
 
-    # TODO parallelize this loop for performance?
     for sim in range(num_simulations):
-        balances = {
-            name: cfg.initial_investment for name, cfg in asset_classes_config.items()
-        }
-
-        # Initialize random generators per asset
-        rngs = {name: np.random.default_rng() for name in asset_classes_config}
+        assets = initialize_assets(asset_classes_config)
 
         for day in range(num_days):
             year = day // num_trading_days
 
-            # Step balances with GBM returns applied to CURRENT balances
-            for name, cfg in asset_classes_config.items():
-                dt = 1 / num_trading_days
-                random_shock = rngs[name].normal(0, 1)
-                daily_return = (
-                    cfg.expected_return * dt
-                    + cfg.volatility * np.sqrt(dt) * random_shock
-                )
-                balances[name] *= np.exp(daily_return)
+            if day > 0 and day % num_trading_days == 0:
+                if year in event_schedule:
+                    for action in event_schedule[year]:
+                        handler = ACTION_HANDLER_MAP.get(action["type"])
+                        if handler:
+                            added, removed = handler(assets, action, ASSET_CLASS_MAP)
+                            for name in added:
+                                if name not in all_asset_names:
+                                    all_asset_names.add(name)
+                                    raw_sims[name] = np.zeros(
+                                        (num_simulations, num_days)
+                                    )
+                        else:
+                            print(f"Warning: Unknown action type '{action['type']}'")
 
-            daily_investment = 0.0
-            daily_withdrawal = 0.0
+                # --- Annual Asset Value Processing ---
+                for asset in assets.values():
+                    asset.process_annual_step()
 
-            # Apply monthly flows
-            if day % days_per_month == 0 and day > 0:
-                # Investment
-                daily_investment = investment_fn(year) / 12
-                balances["stocks"] += daily_investment
+            # --- Monthly Cash Flow ---
+            if day > 0 and day % days_per_month == 0:
+                # Investments (FIXED: Use allocation logic)
+                monthly_investment = investment_fn(year) / 12
+                allocation = investment_allocation_fn(year)
+                for asset_name, proportion in allocation.items():
+                    if asset_name in assets:
+                        investment_amount = monthly_investment * proportion
+                        assets[asset_name].deposit(investment_amount)
+                investments[sim, day] = monthly_investment
 
-                # Withdraw in priority order
-                remaining = draw_fn(year) / 12
-                daily_withdrawal = remaining
-                for asset in priority_order:
-                    take = min(balances[asset], remaining)
-                    balances[asset] -= take
-                    remaining -= take
-                    if remaining <= 0:
+                # Withdrawals
+                monthly_draw = draw_fn(year) / 12
+                remaining_draw = monthly_draw
+                for asset_name in (p for p in priority_order if p in assets):
+                    if remaining_draw <= 0:
                         break
+                    withdrawn = assets[asset_name].withdraw(remaining_draw)
+                    remaining_draw -= withdrawn
+                withdrawals[sim, day] = monthly_draw - remaining_draw
 
-            # Record results
-            investments[sim, day] = daily_investment
-            withdrawals[sim, day] = daily_withdrawal
-            for name in asset_classes_config:
-                raw_sims[name][sim, day] = balances[name]
+            # --- Daily Recording ---
+            for name in all_asset_names:
+                if name in assets:
+                    raw_sims[name][sim, day] = assets[name].get_current_value()
+                elif day > 0:
+                    raw_sims[name][sim, day] = raw_sims[name][sim, day - 1]
 
-    # Combine into total portfolio
     total_portfolio_raw = sum(raw_sims.values())
-
-    # Melt using your existing function
     total_melted_df = melt_raw_data(
         total_portfolio_raw, "portfolio_value", datetime.now().year, num_years
     )
-
-    # Add investment/withdrawal columns using Polars with_columns
     total_melted_df = total_melted_df.with_columns(
         [
             pl.Series("investment", investments.flatten()),
@@ -374,22 +410,25 @@ def run_multi_asset_simulation(
         ]
     )
 
-    # Individual melted dfs
+    # Create a fresh set of assets just for getting the final list of keys
+    final_assets_list = initialize_assets(asset_classes_config).keys()
     individual_melted_dfs = {
         name: melt_raw_data(
             raw_sims[name], f"{name}_value", datetime.now().year, num_years
         )
-        for name in asset_classes_config
+        for name in final_assets_list
     }
     final_values = total_portfolio_raw[:, -1]
 
     return total_melted_df, individual_melted_dfs, final_values
 
 
-# Step 3: Run the full multi-asset simulation
+# Run the simulation with the generated functions
 simulated_totals_df, simulated_assets_df, final_values = run_multi_asset_simulation(
-    asset_classes_config=initiazed_asset_classes,
+    asset_classes_config=asset_classes,  # CHANGED: Pass the config dict
+    life_phases_config=life_phases,
     investment_fn=investment_fn,
+    investment_allocation_fn=investment_allocation_fn,  # ADDED
     draw_fn=draw_fn,
     num_years=num_years,
     num_trading_days=num_trading_days,
@@ -397,77 +436,72 @@ simulated_totals_df, simulated_assets_df, final_values = run_multi_asset_simulat
     priority_order=draw_priority,
 )
 
-initial_investment_description = "Assets at beginning of simulation:\n"
-for name, config in initiazed_asset_classes.items():
-    initial_investment_description += f"- {name.title()}:\n"
-    initial_investment_description += (
-        f"  - Initial Investment: ${config.initial_investment:,.0f}\n"
-    )
-    initial_investment_description += (
-        f"  - Expected Return: {config.expected_return:.2%}\n"
-    )
-    initial_investment_description += f"  - Volatility: {config.volatility:.2%}\n"
+# This part must come BEFORE the simulation is run to show the true initial state.
+# Since this is a notebook, let's create the description from the config.
+initiazed_asset_classes_for_display = initialize_assets(
+    asset_classes
+)  # For display only
 
-display(Markdown(initial_investment_description))
+rows = []
+for name, config in initiazed_asset_classes_for_display.items():
+    rows.append(
+        {
+            "Name": name.title(),
+            "Initial Investment": config.initial_investment,
+            "Expected Return": config.expected_return,
+            "Volatility": config.volatility,
+        }
+    )
+
+# Create Polars DataFrame
+asset_df = pl.DataFrame(rows)
+summary_df = asset_df.select([
+    pl.lit("Total").alias("Name"),
+    pl.col("Initial Investment").sum().alias("Initial Investment"),
+    pl.col("Expected Return").mean().alias("Expected Return"),
+    pl.col("Volatility").mean().alias("Volatility"),
+])
+
+(
+    GT(pl.concat([asset_df, summary_df], how="vertical"))
+    .fmt_currency("Initial Investment", decimals=0)
+    .fmt_percent("Expected Return", decimals=0)
+    .fmt_percent("Volatility", decimals=0)
+)
 
 
 # %% jupyter={"source_hidden": true}
 def add_lifecycle_milestones(ax, show_legend=True):
     """
     Adds vertical lines for key lifecycle milestones to any plot.
-
-    Args:
-        ax: matplotlib axis object
-        show_legend: bool, whether to show legend for the milestone lines
+    This function now dynamically reads from the life_phases config.
     """
-    current_year = datetime.now().year
-
-    # Add vertical lines for key milestones
+    current_year_dt = datetime.now()
     milestone_lines = []
 
-    if fulltime_years > 0:
+    cumulative_years = 0
+    for i, phase in enumerate(life_phases[:-1]):  # No line needed for the final phase
+        cumulative_years += phase["duration"]
+        line_date = datetime(current_year_dt.year + cumulative_years, 1, 1)
         line = ax.axvline(
-            datetime(current_year + fulltime_years, 5, 5),
-            color="blue",
+            line_date,
+            color=sns.color_palette("husl", len(life_phases))[i],
             linestyle="--",
-            alpha=0.7,
-            label="Stop Full-Time Work",
-        )
-        milestone_lines.append(line)
-
-    if parttime_years > 0:
-        line = ax.axvline(
-            datetime(current_year + fulltime_years + parttime_years, 5, 5),
-            color="green",
-            linestyle="-.",
-            alpha=0.7,
-            label="Full Retirement",
-        )
-        milestone_lines.append(line)
-
-    # Age 70 - Social Security starts
-    if years_to_seventy < num_years:
-        line = ax.axvline(
-            datetime(current_year + years_to_seventy, 5, 5),
-            color="red",
-            linestyle=":",
-            alpha=0.7,
-            label="Age 70 (Social Security)",
+            alpha=0.8,
+            label=life_phases[i + 1]['name'],
         )
         milestone_lines.append(line)
 
     if show_legend and milestone_lines:
-        # Get existing legend entries if any
         handles, labels = ax.get_legend_handles_labels()
-        # Add milestone lines to legend
-        milestone_handles = [line for line in milestone_lines]
+        milestone_handles = milestone_lines
         milestone_labels = [line.get_label() for line in milestone_lines]
 
-        if handles:  # If there are existing legend entries
+        if handles:
             ax.legend(
                 handles + milestone_handles, labels + milestone_labels, loc="upper left"
             )
-        else:  # If no existing legend
+        else:
             ax.legend(milestone_handles, milestone_labels, loc="upper left")
 
 

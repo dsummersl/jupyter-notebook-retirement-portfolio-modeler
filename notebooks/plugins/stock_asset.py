@@ -1,3 +1,4 @@
+from functools import lru_cache
 from .basic_asset import BasicAsset
 from .constants import num_trading_days
 import numpy as np
@@ -5,8 +6,10 @@ import yahooquery as yq
 import polars as pl
 
 
-def fetch_stock_data(tickers: list[str]) -> pl.DataFrame:
-    """Fetches historical data for a list of stock tickers and calculates daily log returns."""
+@lru_cache(maxsize=32)
+def fetch_stock_data(tickers_tuple: tuple[str, ...]) -> pl.DataFrame:
+    """Memoized version of fetch_stock_data. Accepts tickers as a tuple for hashing."""
+    tickers = list(tickers_tuple)
     data = yq.Ticker(tickers)
     historical_data = data.history(start="2001-01-01", end="2020-12-31", interval="1d")
 
@@ -65,7 +68,7 @@ class StockPortfolioAsset(BasicAsset):
         )
 
     def _calculate_portfolio_metrics(self, mix: dict):
-        stock_tickers = list(mix.keys())
+        stock_tickers = tuple(mix.keys())
         stock_log_returns = fetch_stock_data(stock_tickers)
         stock_return, stock_volatility = calculate_portfolio_params(
             stock_log_returns, mix
@@ -75,3 +78,19 @@ class StockPortfolioAsset(BasicAsset):
             "expected_return": stock_return,
             "volatility": stock_volatility,
         }
+
+    def modify(self, updates: dict):
+        """
+        Allows changing the portfolio mix mid-simulation.
+        """
+        if "portfolio_mix" in updates:
+            new_mix = updates["portfolio_mix"]
+
+            # Recalculate metrics based on the new mix
+            new_metrics = self._calculate_portfolio_metrics(new_mix)
+            self.expected_return = new_metrics["expected_return"]
+            self.volatility = new_metrics["volatility"]
+            self.params["portfolio_mix"] = new_mix  # Update params for tracking
+        else:
+            # Pass to parent if we don't handle the update
+            super().modify(updates)
