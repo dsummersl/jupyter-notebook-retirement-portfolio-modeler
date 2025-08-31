@@ -64,7 +64,6 @@ parameter_source = "this notebook"
 
 # Number of Monte Carlo simulations to run
 num_simulations = 10
-starting_age = 30
 simulation_end_age = 90
 inflation_rate = 0.032
 
@@ -74,7 +73,7 @@ inflation_rate = 0.032
 life_phases = [
     {
         "name": "Early Career - Aggressive",
-        "duration": 10,  # Age 30-40
+        "age": 30,  # Age 30
         "annual_income": 90_000,
         "annual_expenses": 70_000,
         "annual_investment": 20_000,
@@ -83,7 +82,7 @@ life_phases = [
     },
     {
         "name": "Buy Primary Residence",
-        "duration": 1,  # Age 40
+        "age": 40,  # Age 40
         "annual_investment": 20_000,  # Still investing this year
         "investment_allocation": {"stocks": 1.0},
         "actions": [
@@ -104,7 +103,7 @@ life_phases = [
     },
     {
         "name": "Mid Career - De-risking",
-        "duration": 14,  # Age 41-55
+        "age": 41,  # Age 41
         "annual_income": 180_000,
         "annual_expenses": 120_000,
         "annual_investment": 30_000,
@@ -125,14 +124,14 @@ life_phases = [
     },
     {
         "name": "Sell Home & Retire",
-        "duration": 1,  # Age 55
+        "age": 55,  # Age 55
         "actions": [
             {"type": "sell_asset", "name": "primary_residence", "destination": "stocks"}
         ],
     },
     {
         "name": "Retirement",
-        "duration": 35,  # Age 55-90
+        "age": 56,  # Age 56
         "annual_income": 40_000,
         "annual_expenses": 130_000,
         "annual_investment": 0,
@@ -206,7 +205,7 @@ def initialize_assets(config: dict) -> dict:
 initiazed_asset_classes = initialize_assets(asset_classes)
 
 # %% jupyter={"source_hidden": true}
-num_years = simulation_end_age - starting_age
+num_years = simulation_end_age - life_phases[0]["age"]
 pi = 75
 
 display(Markdown(description))
@@ -278,11 +277,14 @@ def generate_lifecycle_functions(phases: list[dict], base_inflation_rate: float)
     Processes the life_phases configuration and returns investment and draw functions
     for the simulation.
     """
+    # Validate that ages are in increasing order
+    ages = [phase.get("age", 0) for phase in phases]
+    if ages != sorted(ages):
+        raise ValueError("Life phases must be specified in chronological order by age")
+
     phase_start_years = []
-    current_year = 0
     for phase in phases:
-        phase_start_years.append(current_year)
-        current_year += phase.get("duration", 1)
+        phase_start_years.append(phase.get("age", 0))
 
     def get_phase_for_year(year: int):
         for i in range(len(phase_start_years) - 1, -1, -1):
@@ -332,11 +334,9 @@ def run_multi_asset_simulation(
     Multi-asset Monte Carlo simulation using a pluggable action system.
     """
     event_schedule = {}
-    current_year = 0
     for phase in life_phases_config:
         if "actions" in phase:
-            event_schedule[current_year] = phase["actions"]
-        current_year += phase.get("duration", 1)
+            event_schedule[phase.get("age", 0)] = phase["actions"]
 
     num_days = num_years * num_trading_days
     days_per_month = num_trading_days // 12
@@ -481,7 +481,7 @@ def add_lifecycle_milestones(ax, show_legend=True):
 
     cumulative_years = 0
     for i, phase in enumerate(life_phases[:-1]):  # No line needed for the final phase
-        cumulative_years += phase["duration"]
+        cumulative_years += phase["age"] - life_phases[0]["age"]
         line_date = datetime(current_year_dt.year + cumulative_years, 1, 1)
         line = ax.axvline(
             line_date,
