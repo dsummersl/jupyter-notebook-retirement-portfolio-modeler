@@ -62,6 +62,9 @@ parameter_source = "this notebook"
 num_simulations = 1
 simulation_end_age = 90
 inflation_rate = 0.032
+# Controls the y-axis scale for charts; papermill can override this.
+# Acceptable values: "linear" (default) or "log"
+y_axis_scale = "linear"
 
 life_phases = [
     {
@@ -150,20 +153,26 @@ def add_lifecycle_milestones(ax, show_legend=True):
     """
     Adds vertical lines for key lifecycle milestones to any plot.
     This function now dynamically reads from the life_phases config.
+
+    Fix: compute milestone offsets relative to the first phase age,
+    not cumulatively against the first phase every loop.
     """
-    current_year_dt = datetime.now()
+    current_year = datetime.now().year
     milestone_lines = []
 
-    cumulative_years = 0
-    for i, phase in enumerate(life_phases[:-1]):  # No line needed for the final phase
-        cumulative_years += phase["age"] - life_phases[0]["age"]
-        line_date = datetime(current_year_dt.year + cumulative_years, 1, 1)
+    if len(life_phases) <= 1:
+        return
+
+    palette = sns.color_palette("husl", len(life_phases) - 1)
+    for i in range(1, len(life_phases)):  # start from the second phase
+        offset_years = life_phases[i]["age"] - life_phases[0]["age"]
+        line_date = datetime(current_year + offset_years, 1, 1)
         line = ax.axvline(
             line_date,
-            color=sns.color_palette("husl", len(life_phases))[i],
+            color=palette[i - 1],
             linestyle="--",
             alpha=0.8,
-            label=life_phases[i + 1]["name"],
+            label=life_phases[i]["name"],
         )
         milestone_lines.append(line)
 
@@ -315,7 +324,12 @@ asset_stats_to_polars_df(asset_stats)
 
 # %% jupyter={"source_hidden": true}
 def money_formatter(x, pos):
-    return f"${x / 1_000_000:.1f}M"
+    if x < 1_000:
+        return f"${x:.0f}"
+    elif x < 1_000_000:
+        return f"${x / 1_000:.1f}k"
+    else:
+        return f"${x / 1_000_000:.1f}M"
 
 
 fig, ax = plt.subplots(figsize=(14, 7))
@@ -329,6 +343,12 @@ sns.lineplot(
     errorbar=("pi", pi),
 )
 add_lifecycle_milestones(ax)
+if y_axis_scale == "log":
+    ax.set_yscale("log")
+    ax.set_ylim(bottom=1)
+else:
+    ax.set_yscale("linear")
+    ax.set_ylim(bottom=0)
 
 # Mark significant life events
 ax.yaxis.set_major_formatter(FuncFormatter(money_formatter))
@@ -362,9 +382,15 @@ for i, (name, df) in enumerate(simulated_assets_df.items()):
         linewidth=1,
         errorbar=("pi", pi),
     )
-    ax.set_title(f"Median Projection for {name.title()}")
+    if y_axis_scale == "log":
+        ax.set_yscale("log")
+        ax.set_ylim(bottom=1)
+    else:
+        ax.set_yscale("linear")
+        ax.set_ylim(bottom=0)
+    ax.set_title(f"Median asset value ({name})")
     ax.set_ylabel("Asset Value")
-    ax.yaxis.set_major_formatter(FuncFormatter(lambda x, pos: f"${x / 1_000_000:.2f}M"))
+    ax.yaxis.set_major_formatter(FuncFormatter(money_formatter))
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
     add_lifecycle_milestones(ax, show_legend=False)
 
@@ -470,6 +496,12 @@ sns.lineplot(
     y="median_portfolio_value",
 )
 add_lifecycle_milestones(ax1, show_legend=False)
+if y_axis_scale == "log":
+    ax1.set_yscale("log")
+    ax1.set_ylim(bottom=1)
+else:
+    ax1.set_yscale("linear")
+    ax1.set_ylim(bottom=0)
 
 
 def mil_formatter(x, pos):

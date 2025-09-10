@@ -5,6 +5,11 @@ description: |
 
 num_simulations: 5
 
+# Chart y-axis scale for all value plots.
+# Use "log" for logarithmic (easier to see early low values and late high values).
+# Set to "linear" to use a standard linear scale.
+y_axis_scale: log
+
 life_phases:
   - name: Early Career
     age: 20
@@ -61,4 +66,8 @@ life_phases:
     age: 65
     annual_income: 0
     annual_expenses: 50000
-    annual_investment: 0
+
+  - name: Retirement with Social Security
+    age: 70
+    annual_income: 20000
+    annual_expenses: 50000
