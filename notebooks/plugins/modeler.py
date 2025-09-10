@@ -107,13 +107,17 @@ def generate_lifecycle_functions(phases: list[dict], base_inflation_rate: float)
     if ages != sorted(ages):
         raise ValueError("Life phases must be specified in chronological order by age")
 
+    # Base age of the first phase; translate simulation year offsets to absolute age
+    base_age = phases[0].get("age", 0)
+
     phase_start_years = []
     for phase in phases:
         phase_start_years.append(phase.get("age", 0))
 
     def get_phase_for_year(year: int):
+        absolute_age = base_age + year
         for i in range(len(phase_start_years) - 1, -1, -1):
-            if year >= phase_start_years[i]:
+            if absolute_age >= phase_start_years[i]:
                 return phases[i]
         return phases[0]
 
