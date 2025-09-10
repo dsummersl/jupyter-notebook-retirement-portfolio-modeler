@@ -4,6 +4,13 @@ version = "0.1.0"
 description = "A jupyter notebook that models a mixed set of assets over time using monte carlo simulations"
 readme = "README.md"
 requires-python = ">=3.11"
+authors = [{ name = "Dane Summers", email = "dsummersl@gmail.com" }]
+license = { text = "Apache-2.0" }
+classifiers = [
+"Programming Language :: Python :: 3",
+"License :: OSI Approved",
+"Typing :: Typed",
+]
 dependencies = [
     "great-tables>=0.18.0",
     "jupyterlab>=4.4.6",
@@ -14,6 +21,7 @@ dependencies = [
     "papermill>=2.6.0",
     "polars>=1.32.3",
     "pyarrow>=21.0.0",
+    "pydantic>=2.11.7",
     "seaborn>=0.13.2",
     "yahooquery>=2.4.1",
 ]
@@ -24,3 +32,23 @@ reportUnknownVariableType = false
 reportUnknownParameterType = false
 reportMissingParameterType = false
 reportUnknownMemberType = false
+
+[dependency-groups]
+dev = [
+"pytest>=8",
+"pytest-cov>=6",
+"ruff>=0.5",
+"mypy>=1.10",
+"pre-commit>=3.7"
+]
+
+[tool.ruff]
+line-length = 100
+exclude = [".venv", ".git", "build", "dist"]
+
+[tool.mypy]
+python_version = "3.11"
+packages = ["notebooks"]
+
+[tool.pytest.ini_options]
+addopts = "--cov=browser_history"

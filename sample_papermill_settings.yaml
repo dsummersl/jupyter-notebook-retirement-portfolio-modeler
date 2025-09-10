@@ -3,7 +3,7 @@ description: |
 
   We imagine the 'perfect' retirement: starting saving at 20 years old, and saving 5% of their income.
 
-num_simulations: 100
+num_simulations: 5
 
 life_phases:
   - name: Early Career
@@ -12,7 +12,26 @@ life_phases:
     annual_expenses: 35000
     annual_investment: 2000
     investment_allocation:
-      stocks: 1.0
+      savings: 0.5
+      retirement: 0.5
+    actions:
+      - type: grant_asset
+        name: savings
+        config:
+          type: basic_asset
+          params:
+            initial_investment: 1000
+            expected_return: 0.04
+            volatility: 0.05
+      - type: grant_asset
+        name: retirement
+        config:
+          type: stock_portfolio
+          params:
+            initial_investment: 1000
+            portfolio_mix:
+              VTSAX: 0.90 # Vanguard Total Stock Market Index Fund (stocks)
+              VBTLX: 0.10 # Vanguard Total Bond Market Index Fund (bonds)
 
   - name: Better Job
     age: 30
@@ -20,7 +39,7 @@ life_phases:
     annual_expenses: 65000
     annual_investment: 5000
     investment_allocation:
-      stocks: 1.0
+      retirement: 1.0
 
   - name: Latter Career
     age: 50
@@ -28,11 +47,11 @@ life_phases:
     annual_expenses: 70000
     annual_investment: 10000
     investment_allocation:
-      stocks: 0.8
-      emergency_fund: 0.2
+      retirement: 0.8
+      savings: 0.2
     actions:
       - type: modify_asset
-        name: stocks
+        name: retirement
         updates:
           portfolio_mix:
             VTSAX: 0.60 # Vanguard Total Stock Market Index Fund (stocks)
@@ -43,20 +62,3 @@ life_phases:
     annual_income: 0
     annual_expenses: 50000
     annual_investment: 0
-
-asset_classes:
-  stocks:
-    type: stock_portfolio
-    params:
-      initial_investment: 1000
-      portfolio_mix:
-        VTSAX: 0.90 # Vanguard Total Stock Market Index Fund (stocks)
-        VBTLX: 0.10 # Vanguard Total Bond Market Index Fund (bonds)
-  emergency_fund:
-    type: basic_asset
-    params:
-      initial_investment: 1000
-      expected_return: 0.041
-      volatility: 0.005
-
-draw_priority: ["emergency_fund", "stocks", "real_estate"]
