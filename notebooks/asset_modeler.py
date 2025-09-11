@@ -59,39 +59,41 @@ description = "A sample simulation of a 30 year old making modest contributions 
 parameter_source = "this notebook"
 
 # Number of Monte Carlo simulations to run
-num_simulations = 1
+num_simulations = 10
 simulation_end_age = 90
 inflation_rate = 0.032
-# Controls the y-axis scale for charts; papermill can override this.
-# Acceptable values: "linear" (default) or "log"
+
+# Acceptable values: "linear" or "log"
 y_axis_scale = "linear"
 
 life_phases = [
     {
         "name": "Early Career",
-        "age": 30,  # Age 30
+        "age": 30,
         "annual_income": 90_000,
         "annual_expenses": 70_000,
         "annual_investment": 20_000,
+        "investment_allocation": {"stocks": 1.0},
+        "actions": [{
+            'type': 'grant_asset',
+            'name': 'savings',
+            'config': {
+                'type': 'basic_asset',
+                'params': {
+                    'initial_investment': 0,
+                    'expected_return': 0.05,
+                    'volatility': 0.15
+                }
+            }
+        }]
+    },
+    {
+        "name": "Retire",
+        "age": 65,
+        "annual_income": 20_000,
+        "annual_investment": 0,
     },
 ]
-
-# Which asset classes to draw from to cover expense shortfalls.
-# TODO remove these?
-initial_investment = 0
-
-# Define a minimal default asset class configuration for display and stats
-asset_classes = {
-    "stocks": {
-        "type": "stock_portfolio",
-        "params": {
-            "name": "stocks",
-            "initial_investment": initial_investment,
-            "portfolio_mix": {"VTI": 1.0},
-        },
-    }
-}
-
 
 # # Example: Load configuration from a YAML file
 # import yaml
@@ -325,11 +327,11 @@ asset_stats_to_polars_df(asset_stats)
 # %% jupyter={"source_hidden": true}
 def money_formatter(x, pos):
     if x < 1_000:
-        return f"${x:.0f}"
+        return f"${x}"
     elif x < 1_000_000:
-        return f"${x / 1_000:.1f}k"
+        return f"${int(x / 1_000)}k"
     else:
-        return f"${x / 1_000_000:.1f}M"
+        return f"${int(x / 1_000_000)}M"
 
 
 fig, ax = plt.subplots(figsize=(14, 7))
@@ -406,26 +408,29 @@ plt.show()
 
 # %% jupyter={"source_hidden": true}
 def create_investment_draw_data(investment_fn, draw_fn, num_years, num_trading_days):
-    """Creates yearly investment and draw data aligned with simulation timeline."""
+    """Create cumulative investment and draw series distributed evenly across trading days."""
     num_days = num_years * num_trading_days
 
-    # Initialize arrays for yearly values
-    yearly_investments = np.zeros(num_days)
-    yearly_draws = np.zeros(num_days)
+    # Allocate per-day amounts by spreading each year's total across its trading days,
+    # then build cumulative series so the graphs evolve smoothly by trading day.
+    daily_investments = np.zeros(num_days)
+    daily_draws = np.zeros(num_days)
 
-    # Calculate total investment and draw for each year, then apply to all days in that year
     for day in range(num_days):
-        year = day // num_trading_days  # Which year this day belongs to
+        year = day // num_trading_days  # Which simulation year this trading day belongs to
 
-        # Get the annual amounts for this year
+        # Annual amounts for this year
         annual_investment = investment_fn(year)
         annual_draw = draw_fn(year)
 
-        # Apply the same yearly value to all days in this year
-        yearly_investments[day] = annual_investment
-        yearly_draws[day] = annual_draw
+        # Distribute evenly across trading days to avoid yearly steps
+        daily_investments[day] = annual_investment / num_trading_days
+        daily_draws[day] = annual_draw / num_trading_days
 
-    return yearly_investments, yearly_draws
+    cumulative_investments = np.cumsum(daily_investments)
+    cumulative_draws = np.cumsum(daily_draws)
+
+    return cumulative_investments, cumulative_draws
 
 
 # Generate the investment and draw data
@@ -504,11 +509,7 @@ else:
     ax1.set_ylim(bottom=0)
 
 
-def mil_formatter(x, pos):
-    return f"${x / 1_000_000:,.1f} M"
-
-
-ax1.yaxis.set_major_formatter(FuncFormatter(mil_formatter))
+ax1.yaxis.set_major_formatter(FuncFormatter(money_formatter))
 ax1.set_ylabel("Dollars")
 ax1.set_title("Median Portfolio Value")
 

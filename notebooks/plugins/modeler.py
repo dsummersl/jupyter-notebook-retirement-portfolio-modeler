@@ -26,7 +26,6 @@ ASSET_CLASS_MAP = {
     "basic_asset": BasicAsset,
     "stock_portfolio": StockPortfolioAsset,
     "mortgaged_real_estate": MortgagedRealEstateAsset,
-    # TODO add more
 }
 
 
@@ -104,6 +103,9 @@ def generate_lifecycle_functions(phases: list[dict], base_inflation_rate: float)
     """
     Processes the life_phases configuration and returns investment and draw functions
     for the simulation.
+
+    Change: If a phase omits annual_income, annual_expenses, or annual_investment,
+    the value carries forward from the most recent prior phase that specified it.
     """
     # Validate that ages are in increasing order
     ages = [phase.get("age", 0) for phase in phases]
@@ -113,9 +115,7 @@ def generate_lifecycle_functions(phases: list[dict], base_inflation_rate: float)
     # Base age of the first phase; translate simulation year offsets to absolute age
     base_age = phases[0].get("age", 0)
 
-    phase_start_years = []
-    for phase in phases:
-        phase_start_years.append(phase.get("age", 0))
+    phase_start_years = [phase.get("age", 0) for phase in phases]
 
     def get_phase_for_year(year: int):
         absolute_age = base_age + year
@@ -124,23 +124,34 @@ def generate_lifecycle_functions(phases: list[dict], base_inflation_rate: float)
                 return phases[i]
         return phases[0]
 
+    def get_latest_value(year: int, key: str, default):
+        """
+        Find the most recent value for `key` at or before the current year (by absolute age).
+        Returns `default` if no prior phase specified the key.
+        """
+        absolute_age = base_age + year
+        latest = None
+        for phase in phases:
+            if phase.get("age", 0) <= absolute_age and key in phase:
+                latest = phase[key]
+        return latest if latest is not None else default
+
     def investment_fn(year: int) -> float:
-        phase = get_phase_for_year(year)
-        return phase.get("annual_investment", 0)
+        # Carry forward annual_investment; default to 0 if never defined
+        return float(get_latest_value(year, "annual_investment", 0.0))
 
     def investment_allocation_fn(year: int) -> dict:
-        phase = get_phase_for_year(year)
-        # Default to 100% stocks if not specified, for backward compatibility
-        return phase.get("investment_allocation", {"stocks": 1.0})
+        # Carry forward allocation; if never defined, default to 100% stocks for backward compatibility
+        return dict(get_latest_value(year, "investment_allocation", {"stocks": 1.0}))
 
     def draw_fn(year: int) -> float:
-        phase = get_phase_for_year(year)
-        income = phase.get("annual_income", 0)
-        expenses = phase.get("annual_expenses", 0)
+        # Carry forward income/expenses; default to 0 if never defined
+        income = float(get_latest_value(year, "annual_income", 0.0))
+        expenses = float(get_latest_value(year, "annual_expenses", 0.0))
         inflated_income = compound_value(income, base_inflation_rate, year)
         inflated_expenses = compound_value(expenses, base_inflation_rate, year)
-        net_draw = max(0, inflated_expenses - inflated_income)
-        return net_draw
+        net_draw = max(0.0, inflated_expenses - inflated_income)
+        return float(net_draw)
 
     return investment_fn, investment_allocation_fn, draw_fn
 
