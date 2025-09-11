@@ -37,7 +37,7 @@ from pathlib import Path
 notebook_dir = Path(__file__).parent if "__file__" in globals() else Path.cwd() / "notebooks"
 sys.path.append(str(notebook_dir))
 
-from plugins.constants import num_trading_days
+from plugins.constants import num_trading_days, LifePhases
 from plugins.modeler import (
     run_multi_asset_simulation,
     generate_lifecycle_functions,
@@ -106,7 +106,10 @@ life_phases = [
 
 
 # %% jupyter={"source_hidden": true}
-simulation_start_age: int = int(life_phases[0]["age"])  # help mypy infer int
+validated_life_phases = LifePhases(life_phases=life_phases)
+
+# %% jupyter={"source_hidden": true}
+simulation_start_age: int = int(life_phases[0]["age"])
 num_years = simulation_end_age - simulation_start_age
 pi = 75
 

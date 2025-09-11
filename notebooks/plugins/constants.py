@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 
 # Number of trading days in a year (used for daily returns)
-num_trading_days = 252
+num_trading_days: int = 252
 
 
 class BasicAssetParams(BaseModel):
@@ -23,23 +23,21 @@ class AssetConfig(BaseModel):
 class AssetAction(BaseModel):
     type: str
     name: str
-    cost: float
-    funding_priority: list[str] | None
-    config: AssetConfig
+    cost: float | None = None
+    funding_priority: list[str] | None = None
+    config: AssetConfig | None = None
 
 
 class LifePhase(BaseModel):
     name: str
     age: int
-    annual_income: float
-    annual_expenses: float
-    annual_investment: float
-    withdraw_order: list[str] | None
-    investment_allocation: dict[str, float]
-    actions: list[AssetAction] | None
+    annual_income: float | None = None
+    annual_expenses: float | None = None
+    annual_investment: float | None = None
+    withdraw_order: list[str] | None = None
+    investment_allocation: dict[str, float] | None = None
+    actions: list[AssetAction] | None = None
 
 
-class LifeModelConfig(BaseModel):
-    description: str | None
-    num_simulations: int | None
+class LifePhases(BaseModel):
     life_phases: list[LifePhase]
