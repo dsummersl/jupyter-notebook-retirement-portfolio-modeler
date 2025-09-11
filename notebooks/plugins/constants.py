@@ -1,4 +1,5 @@
-from pydantic import BaseModel
+from typing import Literal
+from pydantic import BaseModel, field_validator
 
 # Number of trading days in a year (used for daily returns)
 num_trading_days: int = 252
@@ -15,13 +16,37 @@ class StockPortfolioParams(BaseModel):
     portfolio_mix: dict[str, float]
 
 
+class RealEstateParams(BaseModel):
+    property_value: float
+    down_payment: float
+    mortgage_rate: float
+    mortgage_term_years: int
+    expected_return: float
+    volatility: float
+
+
 class AssetConfig(BaseModel):
-    type: str
-    params: BasicAssetParams | StockPortfolioParams
+    type: Literal["basic_asset", "stock_portfolio", "mortgaged_real_estate"]
+    params: BasicAssetParams | StockPortfolioParams | RealEstateParams
+
+    @field_validator("params", mode="before")
+    @classmethod
+    def validate_params(cls, v, info):
+        asset_type = info.data.get("type")
+        if asset_type == "basic_asset":
+            BasicAssetParams(**v)
+        elif asset_type == "stock_portfolio":
+            StockPortfolioParams(**v)
+        elif asset_type == "mortgaged_real_estate":
+            RealEstateParams(**v)
+        else:
+            raise ValueError(f"Unknown asset type: {asset_type}")
+        return v
+
 
 
 class AssetAction(BaseModel):
-    type: str
+    type: Literal["grant_asset", "buy_asset", "sell_asset", "modify_asset"]
     name: str
     cost: float | None = None
     funding_priority: list[str] | None = None
