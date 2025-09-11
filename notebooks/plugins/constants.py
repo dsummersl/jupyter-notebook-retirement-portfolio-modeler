@@ -34,6 +34,7 @@ class LifePhase(BaseModel):
     annual_income: float
     annual_expenses: float
     annual_investment: float
+    withdraw_order: list[str] | None
     investment_allocation: dict[str, float]
     actions: list[AssetAction] | None
 

@@ -9,7 +9,7 @@ from logging.handlers import RotatingFileHandler
 # Configure a rotating file logger for simulations
 logger = logging.getLogger("simulation")
 if not logger.handlers:
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG)
     fh = RotatingFileHandler("simulation.log", maxBytes=2_000_000, backupCount=3)
     fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
     fh.setFormatter(fmt)
@@ -17,6 +17,7 @@ if not logger.handlers:
 
 from .basic_asset import BasicAsset
 from .stock_asset import StockPortfolioAsset
+from .real_estate_asset import MortgagedRealEstateAsset
 from .constants import num_trading_days
 from .actions import ACTION_HANDLER_MAP
 
@@ -24,6 +25,8 @@ from .actions import ACTION_HANDLER_MAP
 ASSET_CLASS_MAP = {
     "basic_asset": BasicAsset,
     "stock_portfolio": StockPortfolioAsset,
+    "mortgaged_real_estate": MortgagedRealEstateAsset,
+    # TODO add more
 }
 
 
@@ -149,23 +152,31 @@ def run_multi_asset_simulation(
     draw_fn,
     num_years,
     num_simulations,
-    priority_order=None,
 ):
     """
     Multi-asset Monte Carlo simulation using a pluggable action system.
     """
     # Build an event schedule keyed by years since the start age
     event_schedule: dict[int, list[dict]] = {}
+    # Also capture any withdraw_order specified at the life phase level
+    withdraw_order_schedule: dict[int, list[str]] = {}
     if not life_phases_config:
         life_phases_config = []
     start_age = life_phases_config[0].get("age", 0) if life_phases_config else 0
     for phase in life_phases_config:
+        rel_year = max(0, phase.get("age", start_age) - start_age)
         if "actions" in phase and phase["actions"]:
-            rel_year = max(0, phase.get("age", start_age) - start_age)
             event_schedule[rel_year] = phase["actions"]
+        # If the life phase specifies a withdraw_order, apply it at the start of that phase
+        if "withdraw_order" in phase and phase["withdraw_order"]:
+            withdraw_order_schedule[rel_year] = list(phase["withdraw_order"])
 
     num_days = num_years * num_trading_days
     days_per_month = num_trading_days // 12
+
+    # Dynamic withdrawal order; tracks assets as they are added/removed.
+    # Actions may explicitly set it via 'withdraw_order'.
+    withdraw_order: list[str] = []
 
     # Simulation storage
     all_asset_names: set[str] = set()
@@ -181,25 +192,47 @@ def run_multi_asset_simulation(
             year = day // num_trading_days
 
             if day % num_trading_days == 0:
+                # Apply life-phase-defined withdraw_order at the start of the year, if any.
+                if year in withdraw_order_schedule:
+                    withdraw_order = withdraw_order_schedule[year]
+                    logger.debug("phase-set withdrawal order to " + ", ".join(withdraw_order) if withdraw_order else "(empty)")
                 if year in event_schedule:
                     for action in event_schedule[year]:
                         handler = ACTION_HANDLER_MAP.get(action["type"])
                         if handler:
-                            logger.info(f"[sim={sim}] Y{year}: executing action {action['type']} name={action.get('name')}")
+                            logger.info(
+                                f"[sim={sim}] Y{year}: executing action {action['type']} name={action.get('name')}"
+                            )
                             added, removed = handler(assets, action, ASSET_CLASS_MAP)
                             logger.info(f"[sim={sim}] Y{year}: added={added} removed={removed}")
                             for name in added:
                                 if name not in all_asset_names:
                                     all_asset_names.add(name)
                                     raw_sims[name] = np.zeros((num_simulations, num_days))
+                                # Maintain withdrawal order by appending new assets if not present
+                                if name not in withdraw_order:
+                                    _ = withdraw_order.append(name)
+                                    logger.debug("removing " + name + " from withdrawal order")
+                            # Remove any assets that were removed from the withdrawal order
+                            for name in removed:
+                                if name in withdraw_order:
+                                    _ = withdraw_order.remove(name)
+                                    logger.debug("adding " + name + " to withdrawal order")
                         else:
                             logger.warning(f"[sim={sim}] Unknown action type '{action['type']}'")
+
+                        # Allow an action to explicitly redefine the withdrawal order
+                        if "withdraw_order" in action and action["withdraw_order"]:
+                            withdraw_order = action["withdraw_order"]
+                            logger.debug("setting withdrawal order to " + ", ".join(withdraw_order))
 
                 # --- Annual Asset Value Processing (after first full year) ---
                 if day > 0:
                     for asset in assets.values():
                         asset.process_annual_step()
-                    logger.info(f"[sim={sim}] Y{year}: processed annual step for {len(assets)} assets")
+                    logger.info(
+                        f"[sim={sim}] Y{year}: processed annual step for {len(assets)} assets"
+                    )
 
             # --- Monthly Cash Flow ---
             if day > 0 and day % days_per_month == 0:
@@ -211,27 +244,33 @@ def run_multi_asset_simulation(
                     if asset_name in assets:
                         investment_amount = monthly_investment * proportion
                         assets[asset_name].deposit(investment_amount)
-                        logger.info(f"[sim={sim}] D{day} Y{year}: deposit {investment_amount:.2f} -> {asset_name}")
+                        logger.info(
+                            f"[sim={sim}] D{day} Y{year}: deposit {investment_amount:.2f} -> {asset_name}"
+                        )
                     else:
-                        logger.info(f"[sim={sim}] D{day} Y{year}: skip deposit {monthly_investment * proportion:.2f} -> missing asset '{asset_name}'")
+                        logger.info(
+                            f"[sim={sim}] D{day} Y{year}: skip deposit {monthly_investment * proportion:.2f} -> missing asset '{asset_name}'"
+                        )
                 investments[sim, day] = monthly_investment
 
                 # Withdrawals
                 monthly_draw = draw_fn(year) / 12
                 remaining_draw = monthly_draw
-                withdrawal_order = (
-                    priority_order
-                    if isinstance(priority_order, (list, tuple))
-                    else list(assets.keys())
-                )
-                for asset_name in (p for p in withdrawal_order if p in assets):
+                # Determine withdrawal order based on maintained list of assets.
+                # If no explicit order has been established yet, fall back to current assets order.
+                order = withdraw_order if withdraw_order else list(assets.keys())
+                logger.debug("order for withdrawal: " + ", ".join(order))
+                logger.debug("withdraw_order for withdrawal: " + ", ".join(withdraw_order))
+                for asset_name in (p for p in order if p in assets):
                     if remaining_draw <= 0:
                         break
                     withdrawn = assets[asset_name].withdraw(remaining_draw)
                     remaining_draw -= withdrawn
                 fulfilled = monthly_draw - remaining_draw
                 withdrawals[sim, day] = fulfilled
-                logger.info(f"[sim={sim}] D{day} Y{year}: withdraw requested={monthly_draw:.2f} fulfilled={fulfilled:.2f}")
+                logger.info(
+                    f"[sim={sim}] D{day} Y{year}: withdraw requested={monthly_draw:.2f} fulfilled={fulfilled:.2f}"
+                )
 
             # --- Daily Recording ---
             for name in all_asset_names:
