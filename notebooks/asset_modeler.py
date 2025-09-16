@@ -44,8 +44,6 @@ from plugins.modeler import (
 )
 
 # %config InlineBackend.figure_format = "retina"
-
-# %config InlineBackend.figure_format = "retina"
 sns.set_theme()
 
 # %% [markdown]
@@ -115,6 +113,102 @@ pi = 75
 
 display(Markdown(description))
 display(Markdown(f"Parameters sourced from: {parameter_source}"))
+
+# %% [markdown]
+# ## Summary of Life Phases
+
+# %% jupyter={"source_hidden": true}
+def summarize_life_phases(phases: list[dict]) -> GT:
+    """
+    Build a pretty table of life phases including actions.
+    Columns: Phase, Age, Annual Income, Annual Expenses, Action, Type, Cost
+
+    Changes:
+    - Show an em-dash for Income/Expenses when the phase does not explicitly update them.
+    - If a phase has multiple actions, only the first action row shows Phase/Age/Income/Expenses.
+      Subsequent action rows for the same phase leave those columns blank.
+    - If a phase has no actions, shows a single row with em-dash entries and zero cost.
+    """
+    rows: list[dict] = []
+    for ph in phases:
+        actions = ph.get("actions") or [None]
+        first_row_for_phase = True
+
+        # Determine whether this phase explicitly sets income/expenses
+        has_income = "annual_income" in ph and ph.get("annual_income") is not None
+        has_expenses = "annual_expenses" in ph and ph.get("annual_expenses") is not None
+
+        income_value = float(ph["annual_income"]) if has_income else None
+        expenses_value = float(ph["annual_expenses"]) if has_expenses else None
+
+        for act in actions:
+            if act is None:
+                act_name = "—"
+                act_type = "—"
+                cost = 0.0
+            else:
+                act_name = act.get("name", "—")
+                act_type = act.get("type", "—")
+
+                # Extract params consistently whether nested under "config" or directly on the action
+                params = {}
+                if "params" in act and isinstance(act.get("params"), dict):
+                    params = act.get("params") or {}
+                elif "config" in act and isinstance(act.get("config"), dict):
+                    cfg = act.get("config") or {}
+                    params = cfg.get("params") or {}
+
+                # Heuristic for cost:
+                # - Prefer explicit initial_investment (e.g., for grant_asset)
+                # - Otherwise use 'amount' if provided (e.g., buy/sell/modify)
+                # - Default to 0.0 if not specified
+                cost = params.get("initial_investment")
+                if cost is None:
+                    cost = params.get("amount")
+                if cost is None:
+                    cost = 0.0
+
+            # Show phase details only on the first action row of the phase
+            phase_cell = ph.get("name", "") if first_row_for_phase else None
+            age_cell = int(ph.get("age", 0) or 0) if first_row_for_phase else None
+            income_cell = income_value if first_row_for_phase else None
+            expenses_cell = expenses_value if first_row_for_phase else None
+
+            rows.append(
+                {
+                    "Phase": phase_cell,
+                    "Age": age_cell,
+                    "Income": income_cell,
+                    "Expenses": expenses_cell,
+                    "Action Name": act_name,
+                    "Action Type": act_type,
+                    "Cost": float(cost),
+                }
+            )
+
+            first_row_for_phase = False
+
+    df = pl.DataFrame(rows)
+
+    return (
+        GT(df)
+        .tab_header(title="Summary of Life Phases")
+        .cols_label(
+            {
+                "Phase": "Phase",
+                "Age": "Age",
+                "Income": "Annual Income",
+                "Expenses": "Annual Expenses",
+                "Action Name": "Action",
+                "Action Type": "Type",
+                "Cost": "Cost",
+            }
+        )
+        .fmt_currency(["Income", "Expenses", "Cost"], decimals=0)
+        .sub_missing(missing_text="—")
+    )
+
+summarize_life_phases(life_phases)
 
 # %% jupyter={"source_hidden": true}
 # These functions fetch historical data and calculate the accurate risk/return profile for the stock portfolio.
@@ -411,67 +505,39 @@ plt.show()
 
 # %% jupyter={"source_hidden": true}
 def create_investment_draw_data(investment_fn, draw_fn, num_years, num_trading_days):
-    """Create cumulative investment and draw series distributed evenly across trading days."""
-    num_days = num_years * num_trading_days
+    """Create per-year investment and draw series (not cumulative)."""
+    annual_investments = np.zeros(num_years)
+    annual_draws = np.zeros(num_years)
 
-    # Allocate per-day amounts by spreading each year's total across its trading days,
-    # then build cumulative series so the graphs evolve smoothly by trading day.
-    daily_investments = np.zeros(num_days)
-    daily_draws = np.zeros(num_days)
+    for year in range(num_years):
+        annual_investments[year] = investment_fn(year)
+        annual_draws[year] = draw_fn(year)
 
-    for day in range(num_days):
-        year = day // num_trading_days  # Which simulation year this trading day belongs to
-
-        # Annual amounts for this year
-        annual_investment = investment_fn(year)
-        annual_draw = draw_fn(year)
-
-        # Distribute evenly across trading days to avoid yearly steps
-        daily_investments[day] = annual_investment / num_trading_days
-        daily_draws[day] = annual_draw / num_trading_days
-
-    cumulative_investments = np.cumsum(daily_investments)
-    cumulative_draws = np.cumsum(daily_draws)
-
-    return cumulative_investments, cumulative_draws
+    return annual_investments, annual_draws
 
 
-# Generate the investment and draw data
-cumulative_investments, cumulative_draws = create_investment_draw_data(
+# Generate the investment and draw data (per year, not cumulative)
+annual_investments, annual_draws = create_investment_draw_data(
     investment_fn, draw_fn, num_years, num_trading_days
 )
 
-# Create the draw_df using the same realistic trading dates as the main simulation
-realistic_trading_days = generate_trading_days(datetime.now().year, num_years)
-num_days = num_years * num_trading_days
+# Create an annual date series (one point per year) and build the draw_df
+annual_dates = [datetime(datetime.now().year + y, 1, 1) for y in range(num_years)]
 
-# Ensure we have the right number of trading days
-if len(realistic_trading_days) < num_days:
-    last_date = realistic_trading_days[-1]
-    additional_days = pd.bdate_range(
-        start=last_date + timedelta(days=1),
-        periods=num_days - len(realistic_trading_days),
-        freq="B",
-    )
-    realistic_trading_days.extend([day.to_pydatetime() for day in additional_days])
-
-realistic_trading_days = realistic_trading_days[:num_days]
-
-# Create the draw_df in the format expected by your plotting code
 draw_data = []
-for i, date in enumerate(realistic_trading_days):
+for y, date in enumerate(annual_dates):
     draw_data.append(
         {
             "trading_date": date,
-            "value": cumulative_investments[i],
-            "variable": "Cumulative Investments",
+            "value": annual_investments[y],
+            "variable": "Annual Investments",
         }
     )
     draw_data.append(
         {
             "trading_date": date,
-            "value": cumulative_draws[i],
-            "variable": "Cumulative Draws",
+            "value": annual_draws[y],
+            "variable": "Annual Draws",
         }
     )
 
@@ -495,7 +561,7 @@ plt.gca().yaxis.set_major_formatter(FuncFormatter(money_formatter))
 # Add labels and title
 ax2.set_xlabel("Years")
 ax2.set_ylabel("Dollars")
-ax2.set_title("Investment & Draws over time")
+ax2.set_title("Investments & Draws per year")
 
 sns.lineplot(
     ax=ax1,

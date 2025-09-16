@@ -1,5 +1,5 @@
 from functools import lru_cache
-from .basic_asset import BasicAsset
+from .base_asset import BaseAsset
 from .constants import num_trading_days
 import numpy as np
 import yahooquery as yq
@@ -56,15 +56,20 @@ def calculate_portfolio_params(
     return portfolio_expected_return, portfolio_volatility
 
 
-class StockPortfolioAsset(BasicAsset):
+class StockPortfolioAsset(BaseAsset):
     """
     An asset representing a portfolio of stocks.
     It calculates its own return and volatility from the mix.
     """
 
     def __init__(self, params: dict):
+        self.portfolio_mix = params["portfolio_mix"]
         super().__init__(
-            {**params, **self._calculate_portfolio_metrics(params["portfolio_mix"])}
+            {
+              **params,
+              **self._calculate_portfolio_metrics(params["portfolio_mix"]),
+              "process_frequency": "daily",
+            }
         )
 
     def _calculate_portfolio_metrics(self, mix: dict):
@@ -88,9 +93,9 @@ class StockPortfolioAsset(BasicAsset):
 
             # Recalculate metrics based on the new mix
             new_metrics = self._calculate_portfolio_metrics(new_mix)
-            self.expected_return = new_metrics["expected_return"]
-            self.volatility = new_metrics["volatility"]
-            self.params["portfolio_mix"] = new_mix  # Update params for tracking
+            self.asset_params.expected_return = new_metrics["expected_return"]
+            self.asset_params.volatility = new_metrics["volatility"]
+            self.portfolio_mix = new_mix
         else:
             # Pass to parent if we don't handle the update
             super().modify(updates)

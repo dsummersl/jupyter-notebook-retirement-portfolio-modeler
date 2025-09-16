@@ -1,10 +1,9 @@
 description: |
   This configuration is a sample for a retirement planning scenario.
 
-  We imagine the 'perfect' retirement: starting saving at 20 years old, and saving 5% of their income.
+  We imagine the 'perfect' retirement plan: starting saving at 20 years old, and saving 5% of their income.
 
-num_simulations: 5
-y_axis_scale: log
+num_simulations: 500
 
 life_phases:
   - name: Early Career
@@ -67,5 +66,3 @@ life_phases:
   - name: Retirement with Social Security
     age: 70
     annual_income: 20000
-    annual_expenses: 50000
-    annual_investment: 0

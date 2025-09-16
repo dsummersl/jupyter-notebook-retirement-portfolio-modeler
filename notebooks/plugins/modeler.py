@@ -15,7 +15,7 @@ if not logger.handlers:
     fh.setFormatter(fmt)
     logger.addHandler(fh)
 
-from .basic_asset import BasicAsset
+from .base_asset import BaseAsset
 from .stock_asset import StockPortfolioAsset
 from .real_estate_asset import MortgagedRealEstateAsset
 from .constants import num_trading_days
@@ -23,7 +23,7 @@ from .actions import ACTION_HANDLER_MAP
 
 
 ASSET_CLASS_MAP = {
-    "basic_asset": BasicAsset,
+    "basic_asset": BaseAsset,
     "stock_portfolio": StockPortfolioAsset,
     "mortgaged_real_estate": MortgagedRealEstateAsset,
 }
@@ -196,13 +196,14 @@ def run_multi_asset_simulation(
     withdrawals = np.zeros((num_simulations, num_days))
 
     for sim in range(num_simulations):
-        # Start with no assets; actions and allocations will introduce them
         assets: dict = {}
 
         for day in range(num_days):
             year = day // num_trading_days
+            is_start_of_year = day % num_trading_days == 0
+            is_start_of_month = day > 0 and day % days_per_month == 0
 
-            if day % num_trading_days == 0:
+            if is_start_of_year:
                 # Apply life-phase-defined withdraw_order at the start of the year, if any.
                 if year in withdraw_order_schedule:
                     withdraw_order = withdraw_order_schedule[year]
@@ -237,17 +238,7 @@ def run_multi_asset_simulation(
                             withdraw_order = action["withdraw_order"]
                             logger.debug("setting withdrawal order to " + ", ".join(withdraw_order))
 
-                # --- Annual Asset Value Processing (after first full year) ---
-                if day > 0:
-                    for asset in assets.values():
-                        asset.process_annual_step()
-                    logger.info(
-                        f"[sim={sim}] Y{year}: processed annual step for {len(assets)} assets"
-                    )
-
-            # --- Monthly Cash Flow ---
-            if day > 0 and day % days_per_month == 0:
-                # Investments (FIXED: Use allocation logic)
+            if is_start_of_month:
                 monthly_investment = investment_fn(year) / 12
                 allocation = investment_allocation_fn(year)
                 for asset_name, proportion in allocation.items():
@@ -264,15 +255,18 @@ def run_multi_asset_simulation(
                         )
                 investments[sim, day] = monthly_investment
 
-                # Withdrawals
                 monthly_draw = draw_fn(year) / 12
                 remaining_draw = monthly_draw
+
                 # Determine withdrawal order based on maintained list of assets.
                 # If no explicit order has been established yet, fall back to current assets order.
                 order = withdraw_order if withdraw_order else list(assets.keys())
-                logger.debug("order for withdrawal: " + ", ".join(order))
+                # Append any missing assets to the end of the order
+                missing_assets = [a for a in assets.keys() if a not in order]
+                full_order = order + missing_assets
+                logger.debug("order for withdrawal: " + ", ".join(full_order))
                 logger.debug("withdraw_order for withdrawal: " + ", ".join(withdraw_order))
-                for asset_name in (p for p in order if p in assets):
+                for asset_name in (p for p in full_order if p in assets):
                     if remaining_draw <= 0:
                         break
                     withdrawn = assets[asset_name].withdraw(remaining_draw)
@@ -282,8 +276,14 @@ def run_multi_asset_simulation(
                 logger.info(
                     f"[sim={sim}] D{day} Y{year}: withdraw requested={monthly_draw:.2f} fulfilled={fulfilled:.2f}"
                 )
+                if remaining_draw > 0:
+                    logger.warning(
+                        f"[sim={sim}] D{day} Y{year}: UNFULFILLED WITHDRAWAL of {remaining_draw:.2f} remaining!"
+                    )
 
-            # --- Daily Recording ---
+            for asset in assets.values():
+                asset.apply_monte_carlo(day)
+
             for name in all_asset_names:
                 if name in assets:
                     raw_sims[name][sim, day] = assets[name].get_current_value()

@@ -9,6 +9,7 @@ class BasicAssetParams(BaseModel):
     initial_investment: float
     expected_return: float
     volatility: float
+    process_frequency: Literal["daily", "monthly", "yearly"] = "monthly"
 
 
 class StockPortfolioParams(BaseModel):
