@@ -18,11 +18,13 @@ fi
 YAML=$1
 
 YAML_BASENAME=$(basename "$YAML" .yaml)
-OUTPUT_NOTEBOOK="notebooks/asset_modeler_${YAML_BASENAME}.ipynb"
-OUTPUT_HTML="notebooks/asset_modeler_${YAML_BASENAME}.html"
+OUTPUT_DIR="runs"
+OUTPUT_NOTEBOOK="${OUTPUT_DIR}/asset_modeler_${YAML_BASENAME}.ipynb"
+OUTPUT_HTML="${OUTPUT_DIR}/asset_modeler_${YAML_BASENAME}.html"
 
-jupytext --to notebook notebooks/asset_modeler.py
-papermill notebooks/asset_modeler.ipynb $OUTPUT_NOTEBOOK -p parameter_source "$YAML" -f "$YAML"
+mkdir -p "$OUTPUT_DIR"
+jupytext --to notebook notebooks/asset_modeler.py -o "${OUTPUT_DIR}/asset_modeler.ipynb"
+papermill "${OUTPUT_DIR}/asset_modeler.ipynb" $OUTPUT_NOTEBOOK -p parameter_source "$YAML" -f "$YAML"
 jupyter nbconvert $OUTPUT_NOTEBOOK --no-input --to html
 
 echo "Output notebook: $OUTPUT_NOTEBOOK"
