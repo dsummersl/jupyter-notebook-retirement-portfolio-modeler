@@ -26,7 +26,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 import matplotlib.dates as mdates
-from datetime import datetime, timedelta
+from datetime import datetime
 import pandas as pd
 from pandas.tseries.holiday import USFederalHolidayCalendar
 from IPython.display import Markdown, display
