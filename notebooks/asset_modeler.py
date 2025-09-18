@@ -17,6 +17,8 @@
 # # Retirement Forecast
 
 # %% jupyter={"source_hidden": true}
+import logging
+from logging.handlers import RotatingFileHandler
 import polars as pl
 import numpy as np
 from great_tables import GT
@@ -64,6 +66,11 @@ inflation_rate = 0.032
 # Acceptable values: "linear" or "log"
 y_axis_scale = "linear"
 
+# Logging configuration
+logging_enabled = False
+logging_level = "DEBUG"
+logging_file = "simulation.log"
+
 life_phases = [
     {
         "name": "Early Career",
@@ -72,18 +79,20 @@ life_phases = [
         "annual_expenses": 70_000,
         "annual_investment": 20_000,
         "investment_allocation": {"stocks": 1.0},
-        "actions": [{
-            'type': 'grant_asset',
-            'name': 'savings',
-            'config': {
-                'type': 'basic_asset',
-                'params': {
-                    'initial_investment': 0,
-                    'expected_return': 0.05,
-                    'volatility': 0.15
-                }
+        "actions": [
+            {
+                "type": "grant_asset",
+                "name": "savings",
+                "config": {
+                    "type": "basic_asset",
+                    "params": {
+                        "initial_investment": 0,
+                        "expected_return": 0.05,
+                        "volatility": 0.15,
+                    },
+                },
             }
-        }]
+        ],
     },
     {
         "name": "Retire",
@@ -104,6 +113,16 @@ life_phases = [
 
 
 # %% jupyter={"source_hidden": true}
+if logging_enabled:
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.getLevelName(logging_level))
+
+    # Add rotating file handler
+    handler = RotatingFileHandler(logging_file, maxBytes=2_000_000, backupCount=3)
+    formatter = logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s")
+    handler.setFormatter(formatter)
+    root_logger.addHandler(handler)
+
 validated_life_phases = LifePhases(life_phases=life_phases)
 
 # %% jupyter={"source_hidden": true}
@@ -116,6 +135,7 @@ display(Markdown(f"Parameters sourced from: {parameter_source}"))
 
 # %% [markdown]
 # ## Summary of Life Phases
+
 
 # %% jupyter={"source_hidden": true}
 def summarize_life_phases(phases: list[dict]) -> GT:
@@ -207,6 +227,7 @@ def summarize_life_phases(phases: list[dict]) -> GT:
         .fmt_currency(["Income", "Expenses", "Cost"], decimals=0)
         .sub_missing(missing_text="—")
     )
+
 
 summarize_life_phases(life_phases)
 

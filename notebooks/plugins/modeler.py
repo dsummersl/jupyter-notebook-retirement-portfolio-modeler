@@ -4,23 +4,13 @@ import pandas as pd
 from datetime import datetime, timedelta
 from pandas.tseries.holiday import USFederalHolidayCalendar
 import logging
-from logging.handlers import RotatingFileHandler
-
-# Configure a rotating file logger for simulations
-logger = logging.getLogger("simulation")
-if not logger.handlers:
-    logger.setLevel(logging.DEBUG)
-    fh = RotatingFileHandler("simulation.log", maxBytes=2_000_000, backupCount=3)
-    fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
-    fh.setFormatter(fmt)
-    logger.addHandler(fh)
-
 from .base_asset import BaseAsset
 from .stock_asset import StockPortfolioAsset
 from .real_estate_asset import MortgagedRealEstateAsset
 from .constants import num_trading_days
 from .actions import ACTION_HANDLER_MAP
 
+logger = logging.getLogger(__name__)
 
 ASSET_CLASS_MAP = {
     "basic_asset": BaseAsset,
@@ -221,15 +211,6 @@ def run_multi_asset_simulation(
                                 if name not in all_asset_names:
                                     all_asset_names.add(name)
                                     raw_sims[name] = np.zeros((num_simulations, num_days))
-                                # Maintain withdrawal order by appending new assets if not present
-                                if name not in withdraw_order:
-                                    _ = withdraw_order.append(name)
-                                    logger.debug("removing " + name + " from withdrawal order")
-                            # Remove any assets that were removed from the withdrawal order
-                            for name in removed:
-                                if name in withdraw_order:
-                                    _ = withdraw_order.remove(name)
-                                    logger.debug("adding " + name + " to withdrawal order")
                         else:
                             logger.warning(f"[sim={sim}] Unknown action type '{action['type']}'")
 
