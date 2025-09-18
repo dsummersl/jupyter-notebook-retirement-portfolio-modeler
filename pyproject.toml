@@ -57,4 +57,4 @@ module = "yahooquery"
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-addopts = "--cov=notebooks"
+addopts = "--cov=notebooks --cov-report=term-missing"
