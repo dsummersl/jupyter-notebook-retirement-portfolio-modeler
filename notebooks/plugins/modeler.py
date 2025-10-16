@@ -7,7 +7,7 @@ import logging
 from .base_asset import BaseAsset
 from .stock_asset import StockPortfolioAsset
 from .real_estate_asset import MortgagedRealEstateAsset
-from .constants import num_trading_days
+from .constants import AssetAction, LifePhase, num_trading_days
 from .actions import ACTION_HANDLER_MAP
 
 logger = logging.getLogger(__name__)
@@ -89,7 +89,7 @@ def melt_raw_data(raw_data, value_name, start_year: int, num_years: int):
     return melted
 
 
-def generate_lifecycle_functions(phases: list[dict], base_inflation_rate: float):
+def generate_lifecycle_functions(phases: list[LifePhase], base_inflation_rate: float):
     """
     Processes the life_phases configuration and returns investment and draw functions
     for the simulation.
@@ -98,19 +98,17 @@ def generate_lifecycle_functions(phases: list[dict], base_inflation_rate: float)
     the value carries forward from the most recent prior phase that specified it.
     """
     # Validate that ages are in increasing order
-    ages = [phase.get("age", 0) for phase in phases]
+    ages = [phase.age for phase in phases]
     if ages != sorted(ages):
         raise ValueError("Life phases must be specified in chronological order by age")
 
     # Base age of the first phase; translate simulation year offsets to absolute age
-    base_age = phases[0].get("age", 0)
-
-    phase_start_years = [phase.get("age", 0) for phase in phases]
+    base_age = phases[0].age
 
     def get_phase_for_year(year: int):
         absolute_age = base_age + year
-        for i in range(len(phase_start_years) - 1, -1, -1):
-            if absolute_age >= phase_start_years[i]:
+        for i in range(len(ages) - 1, -1, -1):
+            if absolute_age >= ages[i]:
                 return phases[i]
         return phases[0]
 
@@ -122,8 +120,8 @@ def generate_lifecycle_functions(phases: list[dict], base_inflation_rate: float)
         absolute_age = base_age + year
         latest = None
         for phase in phases:
-            if phase.get("age", 0) <= absolute_age and key in phase:
-                latest = phase[key]
+            if phase.age <= absolute_age and getattr(phase, key) is not None:
+                latest = getattr(phase, key)
         return latest if latest is not None else default
 
     def investment_fn(year: int) -> float:
@@ -147,30 +145,30 @@ def generate_lifecycle_functions(phases: list[dict], base_inflation_rate: float)
 
 
 def run_multi_asset_simulation(
-    life_phases_config,
-    investment_fn,
-    investment_allocation_fn,
-    draw_fn,
-    num_years,
-    num_simulations,
+    life_phases_config: list[LifePhase],
+    num_years: int,
+    num_simulations: int,
+    inflation_rate: float
 ):
     """
     Multi-asset Monte Carlo simulation using a pluggable action system.
     """
+    investment_fn, investment_allocation_fn, draw_fn = generate_lifecycle_functions(
+        life_phases_config, inflation_rate
+    )
+
     # Build an event schedule keyed by years since the start age
-    event_schedule: dict[int, list[dict]] = {}
+    event_schedule: dict[int, list[AssetAction]] = {}
     # Also capture any withdraw_order specified at the life phase level
     withdraw_order_schedule: dict[int, list[str]] = {}
-    if not life_phases_config:
-        life_phases_config = []
-    start_age = life_phases_config[0].get("age", 0) if life_phases_config else 0
+    start_age = life_phases_config[0].age if life_phases_config else 0
     for phase in life_phases_config:
-        rel_year = max(0, phase.get("age", start_age) - start_age)
-        if "actions" in phase and phase["actions"]:
-            event_schedule[rel_year] = phase["actions"]
+        rel_year = max(0, phase.age - start_age)
+        if phase.actions:
+            event_schedule[rel_year] = phase.actions
         # If the life phase specifies a withdraw_order, apply it at the start of that phase
-        if "withdraw_order" in phase and phase["withdraw_order"]:
-            withdraw_order_schedule[rel_year] = list(phase["withdraw_order"])
+        if phase.withdraw_order:
+            withdraw_order_schedule[rel_year] = list(phase.withdraw_order)
 
     num_days = num_years * num_trading_days
     days_per_month = num_trading_days // 12
@@ -200,24 +198,20 @@ def run_multi_asset_simulation(
                     logger.debug("phase-set withdrawal order to " + ", ".join(withdraw_order) if withdraw_order else "(empty)")
                 if year in event_schedule:
                     for action in event_schedule[year]:
-                        handler = ACTION_HANDLER_MAP.get(action["type"])
+                        # TODO validate the action, this should already have happened...
+                        handler = ACTION_HANDLER_MAP.get(action.type)
                         if handler:
                             logger.info(
-                                f"[sim={sim}] Y{year}: executing action {action['type']} name={action.get('name')}"
+                                f"[sim={sim}] Y{year}: executing action {action.type} name={action.name}"
                             )
-                            added, removed = handler(assets, action, ASSET_CLASS_MAP)
+                            added, removed = handler(assets, action)
                             logger.info(f"[sim={sim}] Y{year}: added={added} removed={removed}")
                             for name in added:
                                 if name not in all_asset_names:
                                     all_asset_names.add(name)
                                     raw_sims[name] = np.zeros((num_simulations, num_days))
                         else:
-                            logger.warning(f"[sim={sim}] Unknown action type '{action['type']}'")
-
-                        # Allow an action to explicitly redefine the withdrawal order
-                        if "withdraw_order" in action and action["withdraw_order"]:
-                            withdraw_order = action["withdraw_order"]
-                            logger.debug("setting withdrawal order to " + ", ".join(withdraw_order))
+                            logger.warning(f"[sim={sim}] Unknown action type '{action.type}'")
 
             if is_start_of_month:
                 monthly_investment = investment_fn(year) / 12

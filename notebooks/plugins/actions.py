@@ -6,7 +6,7 @@ from .constants import AssetAction
 logger = logging.getLogger(__name__)
 
 
-def buy_asset(assets: dict, params: AssetAction | dict, asset_map: dict[str, type]) -> tuple[list[str], list[str]]:
+def buy_asset(assets: dict, params: AssetAction) -> tuple[list[str], list[str]]:
     """
     Handles the purchase of a new asset mid-simulation.
 
@@ -14,24 +14,14 @@ def buy_asset(assets: dict, params: AssetAction | dict, asset_map: dict[str, typ
         assets (dict): The current dictionary of asset objects in the simulation.
         params (dict): The action's parameters from the life_phases config.
                        Expected keys: 'name', 'cost', 'funding_priority', 'config'.
-        asset_map (dict): The global mapping from asset type strings to classes.
-
     Returns:
         A tuple of (assets_added, assets_removed).
     """
-    # Support both dict-config (from YAML) and pydantic AssetAction
-    if isinstance(params, AssetAction):
-        asset_name = params.name
-        cost = float(getattr(params, "cost", 0) or 0)
-        funding_priority = list(params.funding_priority or [])
-        cfg = params.config
-        # pydantic v2 model_dump() will descend into nested models
-        asset_config: dict[str, Any] = cfg.model_dump()
-    else:
-        cost = params.get("cost", 0)
-        funding_priority = params.get("funding_priority", [])
-        asset_name = params["name"]
-        asset_config = params["config"]
+    asset_name = params.name
+    cost = float(getattr(params, "cost", 0) or 0)
+    funding_priority = list(params.funding_priority or [])
+    cfg = params.config
+    asset_config = cfg.model_dump()
 
     if asset_name in assets:
         logger.warning(f"Warning: Asset '{asset_name}' already exists. Skipping buy action.")
@@ -54,13 +44,14 @@ def buy_asset(assets: dict, params: AssetAction | dict, asset_map: dict[str, typ
             f"Needed ${cost:,.0f}, got ${withdrawn_amount:,.0f}."
         )
 
-    # Create and add the new asset if any funds were secured
-    if withdrawn_amount > 0:
+    # Create and add the new asset if any funds were secured OR if cost is 0 (free asset)
+    if withdrawn_amount > 0 or cost == 0:
         # Inject the actual funds into the asset's parameters
         # For a basic asset, this is 'initial_investment'. For a house, 'down_payment'.
         asset_config.setdefault("params", {})
-        asset_config["params"]["initial_investment"] = withdrawn_amount
-        asset_config["params"]["down_payment"] = withdrawn_amount  # For mortgaged assets
+        if withdrawn_amount > 0:
+            asset_config["params"]["initial_investment"] = withdrawn_amount
+            asset_config["params"]["down_payment"] = withdrawn_amount  # For mortgaged assets
         asset_config["params"]["name"] = asset_name
 
         # Use initialize_assets to construct the asset to keep behavior consistent
@@ -73,7 +64,7 @@ def buy_asset(assets: dict, params: AssetAction | dict, asset_map: dict[str, typ
     return [], []
 
 
-def sell_asset(assets: dict, params: dict, asset_map: dict) -> tuple[list[str], list[str]]:
+def sell_asset(assets: dict, params: dict) -> tuple[list[str], list[str]]:
     """
     Handles the sale (liquidation) of an existing asset.
 
@@ -81,8 +72,6 @@ def sell_asset(assets: dict, params: dict, asset_map: dict) -> tuple[list[str], 
         assets (dict): The current dictionary of asset objects.
         params (dict): Expected keys: 'name' (asset to sell),
                        'destination' (asset to deposit proceeds into).
-        asset_map (dict): Not used here, but kept for consistent signature.
-
     Returns:
         A tuple of (assets_added, assets_removed).
     """
@@ -116,7 +105,7 @@ def sell_asset(assets: dict, params: dict, asset_map: dict) -> tuple[list[str], 
     return [], [asset_name]
 
 
-def modify_asset(assets: dict, params: dict, asset_map: dict) -> tuple[list[str], list[str]]:
+def modify_asset(assets: dict, params: dict) -> tuple[list[str], list[str]]:
     """
     Modifies the parameters of an existing asset.
 
@@ -124,8 +113,6 @@ def modify_asset(assets: dict, params: dict, asset_map: dict) -> tuple[list[str]
         assets (dict): The current dictionary of asset objects.
         params (dict): Expected keys: 'name' (asset to modify),
                        'updates' (dict of parameters to change).
-        asset_map (dict): Not used here.
-
     Returns:
         A tuple of (assets_added, assets_removed).
     """
@@ -143,26 +130,19 @@ def modify_asset(assets: dict, params: dict, asset_map: dict) -> tuple[list[str]
     return [asset_name], [asset_name]
 
 
-def grant_asset(assets: dict, params: AssetAction | dict, asset_map: dict[str, type]) -> tuple[list[str], list[str]]:
+def grant_asset(assets: dict, params: AssetAction) -> tuple[list[str], list[str]]:
     """
     Grants (adds) an asset to the simulation without requiring funding/withdrawals.
 
     Args:
         assets (dict): The current dictionary of asset objects in the simulation.
-        params (AssetAction | dict): Expected keys/fields: 'name', 'config'.
-        asset_map (dict[str, type]): The global mapping from asset type strings to classes.
-
+        params (AssetAction): Expected keys/fields: 'name', 'config'.
     Returns:
         A tuple of (assets_added, assets_removed).
     """
-    # Normalize params similar to buy_asset
-    if isinstance(params, AssetAction):
-        asset_name = params.name
-        cfg = params.config
-        asset_config: dict[str, Any] = cfg.model_dump()
-    else:
-        asset_name = params["name"]
-        asset_config = params["config"]
+    asset_name = params.name
+    cfg = params.config
+    asset_config: dict[str, Any] = cfg.model_dump()
 
     if asset_name in assets:
         logger.warning(f"Warning: Asset '{asset_name}' already exists. Skipping grant action.")
@@ -181,7 +161,6 @@ def grant_asset(assets: dict, params: AssetAction | dict, asset_map: dict[str, t
     logger.info(f"Granted asset '{asset_name}' with config type='{asset_config.get('type')}'.")
     return [asset_name], []
 
-# This map is the bridge between the configuration string and the function to execute
 ACTION_HANDLER_MAP = {
     "buy_asset": buy_asset,
     "sell_asset": sell_asset,

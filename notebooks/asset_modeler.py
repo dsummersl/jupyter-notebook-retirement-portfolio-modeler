@@ -40,10 +40,8 @@ notebook_dir = Path(__file__).parent if "__file__" in globals() else Path.cwd() 
 sys.path.append(str(notebook_dir))
 
 from plugins.constants import num_trading_days, LifePhases
-from plugins.modeler import (
-    run_multi_asset_simulation,
-    generate_lifecycle_functions,
-)
+from plugins.modeler import run_multi_asset_simulation
+
 
 # %config InlineBackend.figure_format = "retina"
 sns.set_theme()
@@ -249,19 +247,11 @@ def generate_trading_days(start_year: int, num_years: int) -> list:
     return [day.to_pydatetime() for day in trading_days]
 
 
-# Create the functions from our configuration
-investment_fn, investment_allocation_fn, draw_fn = generate_lifecycle_functions(
-    life_phases, inflation_rate
-)
-
-# Run the simulation with the generated functions
 simulated_totals_df, simulated_assets_df, final_values = run_multi_asset_simulation(
-    life_phases_config=life_phases,
-    investment_fn=investment_fn,
-    investment_allocation_fn=investment_allocation_fn,  # ADDED
-    draw_fn=draw_fn,
-    num_years=num_years,
-    num_simulations=num_simulations,
+    validated_life_phases.life_phases,
+    num_years,
+    num_simulations,
+    inflation_rate
 )
 
 # Determine the set of asset names present over the simulation from outputs only
