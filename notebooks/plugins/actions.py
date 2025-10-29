@@ -64,19 +64,19 @@ def buy_asset(assets: dict, params: AssetAction) -> tuple[list[str], list[str]]:
     return [], []
 
 
-def sell_asset(assets: dict, params: dict) -> tuple[list[str], list[str]]:
+def sell_asset(assets: dict, params: AssetAction) -> tuple[list[str], list[str]]:
     """
     Handles the sale (liquidation) of an existing asset.
 
     Args:
         assets (dict): The current dictionary of asset objects.
-        params (dict): Expected keys: 'name' (asset to sell),
-                       'destination' (asset to deposit proceeds into).
+        params (AssetAction): Expected fields: 'name' (asset to sell),
+                              'destination' (asset to deposit proceeds into).
     Returns:
         A tuple of (assets_added, assets_removed).
     """
-    asset_name = params["name"]
-    destination_name = params["destination"]
+    asset_name = params.name
+    destination_name = params.destination
 
     if asset_name not in assets:
         logger.warning(f"Warning: Cannot sell asset '{asset_name}' because it does not exist.")
@@ -105,19 +105,19 @@ def sell_asset(assets: dict, params: dict) -> tuple[list[str], list[str]]:
     return [], [asset_name]
 
 
-def modify_asset(assets: dict, params: dict) -> tuple[list[str], list[str]]:
+def modify_asset(assets: dict, params: AssetAction) -> tuple[list[str], list[str]]:
     """
     Modifies the parameters of an existing asset.
 
     Args:
         assets (dict): The current dictionary of asset objects.
-        params (dict): Expected keys: 'name' (asset to modify),
-                       'updates' (dict of parameters to change).
+        params (AssetAction): Expected fields: 'name' (asset to modify),
+                              'updates' (dict of parameters to change).
     Returns:
         A tuple of (assets_added, assets_removed).
     """
-    asset_name = params["name"]
-    updates = params["updates"]
+    asset_name = params.name
+    updates = params.updates
 
     if asset_name not in assets:
         logger.warning(f"Warning: Cannot modify asset '{asset_name}' as it does not exist.")

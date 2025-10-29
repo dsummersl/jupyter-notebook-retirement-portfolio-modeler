@@ -247,7 +247,7 @@ def generate_trading_days(start_year: int, num_years: int) -> list:
     return [day.to_pydatetime() for day in trading_days]
 
 
-simulated_totals_df, simulated_assets_df, final_values = run_multi_asset_simulation(
+simulated_totals_df, simulated_assets_df, final_values, investment_fn, draw_fn = run_multi_asset_simulation(
     validated_life_phases.life_phases,
     num_years,
     num_simulations,

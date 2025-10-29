@@ -1,7 +1,7 @@
 description: |
   This configuration is a sample for a retirement planning scenario.
 
-  We imagine the 'perfect' retirement plan: starting saving at 20 years old, and saving 5% of their income.
+  We imagine the 'perfect' retirement plan: starting saving at 20 years old, and saving 15% of their income.
 
 num_simulations: 500
 
@@ -10,7 +10,7 @@ life_phases:
     age: 20
     annual_income: 40000
     annual_expenses: 35000
-    annual_investment: 2000
+    annual_investment: 6000
     investment_allocation:
       savings: 0.5
       retirement: 0.5
@@ -37,7 +37,7 @@ life_phases:
     age: 30
     annual_income: 80000
     annual_expenses: 65000
-    annual_investment: 5000
+    annual_investment: 12000
     investment_allocation:
       retirement: 1.0
 
@@ -45,10 +45,9 @@ life_phases:
     age: 50
     annual_income: 95000
     annual_expenses: 70000
-    annual_investment: 10000
+    annual_investment: 15000
     investment_allocation:
-      retirement: 0.8
-      savings: 0.2
+      retirement: 1.0
     actions:
       - type: modify_asset
         name: retirement

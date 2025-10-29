@@ -23,7 +23,7 @@ def test_run_multi_asset_simulation_no_assets():
     num_years = 1
     num_simulations = 2
 
-    total_df, individual_dfs, final_values = run_multi_asset_simulation(
+    total_df, individual_dfs, final_values, investment_fn, draw_fn = run_multi_asset_simulation(
         LifePhases(life_phases=life_phases_config).life_phases,
         num_years,
         num_simulations,
@@ -91,7 +91,7 @@ def test_run_multi_asset_simulation_with_basic_asset():
     num_years = 1
     num_simulations = 2
 
-    total_df, individual_dfs, final_values = run_multi_asset_simulation(
+    total_df, individual_dfs, final_values, investment_fn, draw_fn = run_multi_asset_simulation(
         LifePhases(life_phases=life_phases_config).life_phases,
         num_years,
         num_simulations,

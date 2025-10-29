@@ -9,10 +9,8 @@ A jupyter notebook that models a mixed set of assets over time using monte carlo
 You can run jupyter lab and interact with this notebook directly:
 
 ```sh
-uv venv
+make setup
 source .venv/bin/activate
-uv sync
-
 jupyter lab
 ```
 
@@ -24,4 +22,22 @@ You can also create your own configuration scenarios and run them in batch using
 ./run_papermill.sh sample_papermill_settings.yaml
 
 open notebooks/asset_modeler_sample_papermill_settings.html
+```
+
+## Development
+
+
+You can run tests and linting using the instructions below:
+
+```sh
+make test
+
+source .venv/bin/activate
+
+# check ruff and fix issues:
+make lint
+make fix
+
+# check mypy types:
+make type
 ```

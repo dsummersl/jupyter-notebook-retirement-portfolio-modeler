@@ -52,6 +52,8 @@ class AssetAction(BaseModel):
     cost: float | None = None
     funding_priority: list[str] | None = None
     config: AssetConfig | None = None
+    destination: str | None = None  # For sell_asset
+    updates: dict | None = None  # For modify_asset
 
 
 class LifePhase(BaseModel):
