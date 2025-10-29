@@ -76,7 +76,7 @@ life_phases = [
         "annual_income": 90_000,
         "annual_expenses": 70_000,
         "annual_investment": 20_000,
-        "investment_allocation": {"stocks": 1.0},
+        "investment_allocation": {"savings": 1.0},
         "actions": [
             {
                 "type": "grant_asset",
@@ -93,9 +93,15 @@ life_phases = [
         ],
     },
     {
-        "name": "Retire",
+        "name": "Part Time",
         "age": 65,
         "annual_income": 20_000,
+        "annual_investment": 0,
+    },
+    {
+        "name": "Retire",
+        "age": 70,
+        "annual_income": 0,
         "annual_investment": 0,
     },
 ]
@@ -365,12 +371,8 @@ def calculate_asset_statistics(assets_df, total_final_values):
 
     # Add total portfolio stats
     stats["Total"] = {
-        "p25": np.percentile(total_final_values, 25),
-        "median": np.median(total_final_values),
-        "p75": np.percentile(total_final_values, 75),
-        "p95": np.percentile(total_final_values, 95),
-        "volatility": np.std(total_final_values),
         "initial": initial_total,
+        "median": np.median(total_final_values),
         "perc_success": (total_final_values > 0).sum() / num_simulations,
     }
 
@@ -381,11 +383,7 @@ def asset_stats_to_polars_df(asset_stats):
     """Convert asset_stats dict to a Polars DataFrame with formatted columns using great_tables"""
     metrics = [
         ("Initial Investment", lambda s: s["initial"]),
-        ("25th Percentile", lambda s: s["p25"]),
-        ("Median (50th)", lambda s: s["median"]),
-        ("75th Percentile", lambda s: s["p75"]),
-        ("95th Percentile", lambda s: s["p95"]),
-        ("Volatility (Std Dev)", lambda s: s["volatility"]),
+        ("Median", lambda s: s["median"]),
         ("Percent > 0", lambda s: s["perc_success"]),
     ]
 
@@ -414,7 +412,7 @@ def asset_stats_to_polars_df(asset_stats):
         GT(df)
         .fmt_currency(["Total"] + assets, decimals=0)
         .fmt_percent(["Total"] + assets, rows=[-1], decimals=0)
-        .fmt_currency(["Total"] + assets, rows=[-2], decimals=0, pattern="±{x}")
+        .fmt_currency(["Total"] + assets, rows=[-2], decimals=0)
     )
 
 

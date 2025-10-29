@@ -354,6 +354,20 @@ def run_multi_asset_simulation(
                 elif day > 0:
                     ctx.raw_sims[name][sim, day] = ctx.raw_sims[name][sim, day - 1]
 
+            # Calculate total portfolio value for early exit optimization
+            total_value = sum(ctx.raw_sims[name][sim, day] for name in ctx.all_asset_names)
+
+            # Early exit if portfolio is depleted - fill remaining days with current values
+            if total_value <= 0:
+                logger.info(f"[sim={sim}] D{day} Y{year}: portfolio depleted (value={total_value:.2f}), ending simulation early")
+                for remaining_day in range(day + 1, num_days):
+                    for name in ctx.all_asset_names:
+                        ctx.raw_sims[name][sim, remaining_day] = ctx.raw_sims[name][sim, day]
+                    # Also forward-fill investments and withdrawals as 0 for remaining days
+                    ctx.investments[sim, remaining_day] = 0.0
+                    ctx.withdrawals[sim, remaining_day] = 0.0
+                break
+
     if ctx.raw_sims:
         total_portfolio_raw = sum(ctx.raw_sims.values())
     else:
