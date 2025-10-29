@@ -107,13 +107,13 @@ life_phases = [
 ]
 
 # # Example: Load configuration from a YAML file
-# import yaml
-#
-# with open("../sample_papermill_settings.yaml", "r") as f:
-#     config = yaml.safe_load(f)
-# description = config["description"]
-# num_simulations = config["num_simulations"]
-# life_phases = config["life_phases"]
+import yaml
+
+with open("../sample_papermill_settings.yaml", "r") as f:
+     config = yaml.safe_load(f)
+description = config["description"]
+num_simulations = config["num_simulations"]
+life_phases = config["life_phases"]
 
 
 # %% jupyter={"source_hidden": true}
