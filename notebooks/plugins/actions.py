@@ -41,27 +41,28 @@ def buy_asset(assets: dict, params: AssetAction) -> tuple[list[str], list[str]]:
     if withdrawn_amount < cost:
         logger.warning(
             f"Warning: Insufficient funds for '{asset_name}'. "
-            f"Needed ${cost:,.0f}, got ${withdrawn_amount:,.0f}."
+            f"Needed ${cost:,.0f}, got ${withdrawn_amount:,.0f}. Asset not created."
         )
+        # Funds were withdrawn but asset purchase failed - money is lost
+        return [], []
 
-    # Create and add the new asset if any funds were secured OR if cost is 0 (free asset)
-    if withdrawn_amount > 0 or cost == 0:
-        # Inject the actual funds into the asset's parameters
-        # For a basic asset, this is 'initial_investment'. For a house, 'down_payment'.
-        asset_config.setdefault("params", {})
-        if withdrawn_amount > 0:
-            asset_config["params"]["initial_investment"] = withdrawn_amount
-            asset_config["params"]["down_payment"] = withdrawn_amount  # For mortgaged assets
-        asset_config["params"]["name"] = asset_name
+    # Create and add the new asset if sufficient funds were secured OR if cost is 0 (free asset)
+    # Inject the actual funds into the asset's parameters
+    # For a basic asset, this is 'initial_investment'. For a mortgaged house, use 'down_payment'.
+    asset_config.setdefault("params", {})
+    if withdrawn_amount > 0:
+        asset_config["params"]["initial_investment"] = withdrawn_amount
+        # For mortgaged_real_estate, also set down_payment (which will be used in the calculation)
+        if asset_config.get("type") == "mortgaged_real_estate":
+            asset_config["params"]["down_payment"] = withdrawn_amount
+    asset_config["params"]["name"] = asset_name
 
-        # Use initialize_assets to construct the asset to keep behavior consistent
-        from .modeler import initialize_assets  # local import to avoid circular at module load
+    # Use initialize_assets to construct the asset to keep behavior consistent
+    from .modeler import initialize_assets  # local import to avoid circular at module load
 
-        new_assets = initialize_assets({asset_name: asset_config})
-        assets[asset_name] = new_assets[asset_name]
-        return [asset_name], []
-
-    return [], []
+    new_assets = initialize_assets({asset_name: asset_config})
+    assets[asset_name] = new_assets[asset_name]
+    return [asset_name], []
 
 
 def sell_asset(assets: dict, params: AssetAction) -> tuple[list[str], list[str]]:

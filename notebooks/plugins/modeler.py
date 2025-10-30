@@ -152,7 +152,10 @@ def generate_lifecycle_functions(phases: list[LifePhase], base_inflation_rate: f
 
     def investment_fn(year: int) -> float:
         # Carry forward annual_investment; default to 0 if never defined
-        return float(get_latest_value(year, "annual_investment", 0.0))
+        annual_investment = float(get_latest_value(year, "annual_investment", 0.0))
+        # Apply inflation adjustment to investment amounts
+        inflated_investment = compound_value(annual_investment, base_inflation_rate, year)
+        return float(inflated_investment)
 
     def investment_allocation_fn(year: int) -> dict:
         # Carry forward allocation; if never defined, default to 100% stocks for backward compatibility

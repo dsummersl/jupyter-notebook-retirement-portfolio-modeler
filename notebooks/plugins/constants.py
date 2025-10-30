@@ -59,7 +59,9 @@ class AssetAction(BaseModel):
 class LifePhase(BaseModel):
     name: str
     age: int
+    # Annual income during this phase
     annual_income: float | None = None
+    # Non discretionary expenses every year - if not covered by annual_income, will be withdrawn from assets
     annual_expenses: float | None = None
     annual_investment: float | None = None
     withdraw_order: list[str] | None = None
