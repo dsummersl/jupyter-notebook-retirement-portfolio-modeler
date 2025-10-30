@@ -46,7 +46,7 @@ def buy_asset(assets: dict, params: AssetAction) -> tuple[list[str], list[str]]:
         # Funds were withdrawn but asset purchase failed - money is lost
         return [], []
 
-    # Create and add the new asset if sufficient funds were secured OR if cost is 0 (free asset)
+    # Create and add the new asset now that sufficient funds were secured
     # Inject the actual funds into the asset's parameters
     # For a basic asset, this is 'initial_investment'. For a mortgaged house, use 'down_payment'.
     asset_config.setdefault("params", {})

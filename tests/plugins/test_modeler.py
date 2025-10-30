@@ -94,9 +94,8 @@ def test_run_multi_asset_simulation_with_asset_type(asset_config):
             "annual_investment": 20000,
             "actions": [
                 {
-                    "type": "buy_asset",
+                    "type": "grant_asset",
                     "name": "savings",
-                    "cost": 0,
                     "config": asset_config
                 }
             ],
